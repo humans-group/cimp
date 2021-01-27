@@ -9,9 +9,9 @@ import (
 )
 
 func main() {
-	pathRaw := flag.String("p", "./config-local.yaml", "Path to yaml with config-file which should be imported")
+	pathRaw := flag.String("p", "./config.yaml", "Path to yaml with config-file which should be imported")
 	formatRaw := flag.String("f", "", "File format: json, yaml. If empty - got from extension. Default: yaml")
-	consulEndpoint := flag.String("c", "consul:8500", "Consul endpoint in format: `address:port`")
+	consulEndpoint := flag.String("c", "127.0.0.1:8500", "Consul endpoint in format: `address:port`")
 	flag.Parse()
 	if pathRaw == nil || formatRaw == nil || consulEndpoint == nil {
 		panic("Impossible! Flags with defaults can't be nil")
@@ -31,10 +31,10 @@ func main() {
 
 	kv.AddPrefix(fmt.Sprintf("services/%s/", serverName))
 
-	repo, err := cimp.InitRepo(cimp.Config{Address: *consulEndpoint})
+	storage, err := cimp.InitStorage(cimp.Config{Address: *consulEndpoint})
 	check(err)
 
-	check(repo.Save(kv))
+	check(storage.Save(kv))
 }
 
 func check(err error) {

@@ -10,11 +10,11 @@ type Config struct {
 	Address string
 }
 
-type ConsulRepo struct {
+type ConsulStorage struct {
 	client *api.Client
 }
 
-func InitRepo(cfg Config) (*ConsulRepo, error) {
+func InitStorage(cfg Config) (*ConsulStorage, error) {
 	clientCfg := api.DefaultConfig()
 	clientCfg.Address = cfg.Address
 
@@ -23,28 +23,34 @@ func InitRepo(cfg Config) (*ConsulRepo, error) {
 		return nil, fmt.Errorf("create consul client: %w", err)
 	}
 
-	return &ConsulRepo{
+	return &ConsulStorage{
 		client: client,
 	}, nil
 }
 
-func (repo *ConsulRepo) Save(kv KV) error {
+func (cs *ConsulStorage) Save(kv KV) error {
+	var ops api.TxnOps
 	for k, v := range kv {
-		kvPair := &api.KVPair{
-			Key:   k,
-			Value: []byte(fmt.Sprintf("%v", v)),
+		op := &api.TxnOp{
+			KV: &api.KVTxnOp{
+				Verb:  api.KVSet,
+				Key:   k,
+				Value: []byte(fmt.Sprintf("%v", v)),
+			},
 		}
-		_, err := repo.client.KV().Put(kvPair, nil)
-		if err != nil {
-			return fmt.Errorf("put %q to consul: %w", k, err)
-		}
+		ops = append(ops, op)
+	}
+
+	ok, _, _, err := cs.client.Txn().Txn(ops, nil)
+	if !ok {
+		return fmt.Errorf("execute consul SET-transaction: %w", err)
 	}
 
 	return nil
 }
 
-func (repo *ConsulRepo) List(prefix string) (KV, error) {
-	pairs, _, err := repo.client.KV().List(prefix, nil)
+func (cs *ConsulStorage) List(prefix string) (KV, error) {
+	pairs, _, err := cs.client.KV().List(prefix, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list with prefix %q from consul: %w", prefix, err)
 	}
@@ -60,9 +66,9 @@ func (repo *ConsulRepo) List(prefix string) (KV, error) {
 	return kv, nil
 }
 
-func (repo *ConsulRepo) Delete(kv KV) error {
+func (cs *ConsulStorage) Delete(kv KV) error {
 	for k := range kv {
-		_, err := repo.client.KV().Delete(k, nil)
+		_, err := cs.client.KV().Delete(k, nil)
 		if err != nil {
 			return fmt.Errorf("delete %q from consul: %w", k, err)
 		}
