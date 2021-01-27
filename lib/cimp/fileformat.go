@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/go-yaml/yaml"
+	"olympos.io/encoding/edn"
 )
 
 type FileFormat string
@@ -13,6 +14,7 @@ type FileFormat string
 const (
 	JsonFormat FileFormat = "json"
 	YamlFormat FileFormat = "yaml"
+	EdnFormat  FileFormat = "edn"
 )
 
 func InitFormat(format, path string) (FileFormat, error) {
@@ -22,16 +24,20 @@ func InitFormat(format, path string) (FileFormat, error) {
 			return JsonFormat, nil
 		case YamlFormat:
 			return YamlFormat, nil
+		case EdnFormat:
+			return EdnFormat, nil
 		default:
 			return "", fmt.Errorf("undefined format: %s", format)
 		}
 	}
 
 	switch filepath.Ext(path) {
-	case "json":
+	case ".json":
 		return JsonFormat, nil
-	case "yml", "yaml":
+	case ".yml", ".yaml":
 		return YamlFormat, nil
+	case ".edn":
+		return EdnFormat, nil
 	}
 
 	return YamlFormat, nil
@@ -46,6 +52,8 @@ func UnmarshalWithFormat(format FileFormat, fileData []byte) (map[interface{}]in
 		err = json.Unmarshal(fileData, &cfgRaw)
 	case YamlFormat:
 		err = yaml.Unmarshal(fileData, &cfgRaw)
+	case EdnFormat:
+		err = edn.Unmarshal(fileData, &cfgRaw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %v", format)
 	}

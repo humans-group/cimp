@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-yaml/yaml"
 	"github.com/hashicorp/consul/api"
+	"olympos.io/encoding/edn"
 )
 
 type KV map[string]interface{}
@@ -109,8 +110,15 @@ func keyToString(prefix string, key interface{}) (string, error) {
 		result += fmt.Sprintf("%f", curKey)
 	case bool:
 		result += fmt.Sprintf("%t", curKey)
+	case edn.Keyword:
+		strKey := curKey.String()
+		if len(strKey) < 1 {
+			return "", fmt.Errorf("edn-key %#v is empty or not stringable", key)
+		}
+		// remove `:` from beginning of the key
+		result += fmt.Sprintf("%s", strKey[1:])
 	default:
-		panic(fmt.Sprintf("invalid config key type: %#v", curKey))
+		return "", fmt.Errorf("invalid config key type: %#v", curKey)
 	}
 
 	return strings.ToLower(result), nil
