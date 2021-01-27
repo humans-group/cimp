@@ -12,20 +12,20 @@ import (
 type FileFormat string
 
 const (
-	JsonFormat FileFormat = "json"
-	YamlFormat FileFormat = "yaml"
-	EdnFormat  FileFormat = "edn"
+	JSONFormat FileFormat = "json"
+	YAMLFormat FileFormat = "yaml"
+	EDNFormat  FileFormat = "edn"
 )
 
 func InitFormat(format, path string) (FileFormat, error) {
 	if len(format) > 1 {
 		switch FileFormat(format) {
-		case JsonFormat:
-			return JsonFormat, nil
-		case YamlFormat:
-			return YamlFormat, nil
-		case EdnFormat:
-			return EdnFormat, nil
+		case JSONFormat:
+			return JSONFormat, nil
+		case YAMLFormat:
+			return YAMLFormat, nil
+		case EDNFormat:
+			return EDNFormat, nil
 		default:
 			return "", fmt.Errorf("undefined format: %s", format)
 		}
@@ -33,14 +33,14 @@ func InitFormat(format, path string) (FileFormat, error) {
 
 	switch filepath.Ext(path) {
 	case ".json":
-		return JsonFormat, nil
+		return JSONFormat, nil
 	case ".yml", ".yaml":
-		return YamlFormat, nil
+		return YAMLFormat, nil
 	case ".edn":
-		return EdnFormat, nil
+		return EDNFormat, nil
 	}
 
-	return YamlFormat, nil
+	return YAMLFormat, nil
 }
 
 func UnmarshalWithFormat(format FileFormat, fileData []byte) (map[interface{}]interface{}, error) {
@@ -48,11 +48,11 @@ func UnmarshalWithFormat(format FileFormat, fileData []byte) (map[interface{}]in
 	var err error
 
 	switch format {
-	case JsonFormat:
+	case JSONFormat:
 		err = json.Unmarshal(fileData, &cfgRaw)
-	case YamlFormat:
+	case YAMLFormat:
 		err = yaml.Unmarshal(fileData, &cfgRaw)
-	case EdnFormat:
+	case EDNFormat:
 		err = edn.Unmarshal(fileData, &cfgRaw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %v", format)
