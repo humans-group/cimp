@@ -3,6 +3,7 @@ package cimp
 import (
 	"fmt"
 	"io/ioutil"
+	"regexp"
 	"strings"
 
 	"github.com/hashicorp/consul/api"
@@ -96,29 +97,47 @@ func (kv KV) fillRecursive(prefix string, rawData interface{}, arrayValueFormat 
 
 func keyToString(prefix string, key interface{}) (string, error) {
 	var result string
-	if len(prefix) > 0 {
-		result = prefix + "/"
-	}
 
 	switch curKey := key.(type) {
 	case string:
-		result += curKey
+		result = curKey
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		result += fmt.Sprintf("%d", curKey)
+		result = fmt.Sprintf("%d", curKey)
 	case float32, float64:
-		result += fmt.Sprintf("%f", curKey)
+		result = fmt.Sprintf("%f", curKey)
 	case bool:
-		result += fmt.Sprintf("%t", curKey)
+		result = fmt.Sprintf("%t", curKey)
 	case edn.Keyword:
 		strKey := curKey.String()
 		if len(strKey) < 1 {
 			return "", fmt.Errorf("edn-key %#v is empty or not stringable", key)
 		}
 		// remove `:` from beginning of the key
-		result += fmt.Sprintf("%s", strKey[1:])
+		result = fmt.Sprintf("%s", strKey[1:])
 	default:
 		return "", fmt.Errorf("invalid config key type: %#v", curKey)
 	}
 
-	return strings.ToLower(result), nil
+	result = ToSnakeCase(result)
+
+	if len(prefix) > 0 {
+		result = prefix + "/" + result
+	}
+
+	return result, nil
+}
+
+var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
+var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+var matchAllSpecSymbols = regexp.MustCompile("[^A-z0-9]")
+var matchAllMultipleUnderscore = regexp.MustCompile("[_]{2,}")
+
+func ToSnakeCase(str string) string {
+	str = matchAllSpecSymbols.ReplaceAllString(str, "_")
+	str = matchFirstCap.ReplaceAllString(str, "${1}_${2}")
+	str = matchAllCap.ReplaceAllString(str, "${1}_${2}")
+	str = matchAllMultipleUnderscore.ReplaceAllString(str, "_")
+	str = strings.Trim(str, "_")
+
+	return strings.ToLower(str)
 }
