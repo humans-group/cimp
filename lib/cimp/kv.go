@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/go-yaml/yaml"
 	"github.com/hashicorp/consul/api"
 	"olympos.io/encoding/edn"
 )
@@ -17,7 +16,7 @@ func NewKV() KV {
 	return kv
 }
 
-func (kv KV) FillFromFile(path string, format FileFormat) error {
+func (kv KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
 	fileData, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read file data: %v", err)
@@ -28,11 +27,11 @@ func (kv KV) FillFromFile(path string, format FileFormat) error {
 		return fmt.Errorf("unmarshal %q-file: %w", format, err)
 	}
 
-	return kv.fillRecursive("", rawData)
+	return kv.fillRecursive("", rawData, arrayValueFormat)
 }
 
-func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}) error {
-	return kv.fillRecursive(prefix, rawData)
+func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
+	return kv.fillRecursive(prefix, rawData, arrayValueFormat)
 }
 
 func (kv KV) Check(key string) bool {
@@ -70,7 +69,7 @@ func (kv KV) AddPrefix(prefix string) {
 	}
 }
 
-func (kv KV) fillRecursive(prefix string, rawData interface{}) error {
+func (kv KV) fillRecursive(prefix string, rawData interface{}, arrayValueFormat FileFormat) error {
 	switch data := rawData.(type) {
 	case map[interface{}]interface{}:
 		for key := range data {
@@ -78,16 +77,16 @@ func (kv KV) fillRecursive(prefix string, rawData interface{}) error {
 			if err != nil {
 				return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
 			}
-			if err := kv.fillRecursive(stringKey, data[key]); err != nil {
+			if err := kv.fillRecursive(stringKey, data[key], arrayValueFormat); err != nil {
 				return err
 			}
 		}
 	case []interface{}:
-		yamlData, err := yaml.Marshal(data)
+		marshaledArray, err := MarshalWithFormat(arrayValueFormat, data)
 		if err != nil {
-			return fmt.Errorf("marshal array %#v to yaml: %w", data, err)
+			return fmt.Errorf("marshal array %#v to %q: %w", data, arrayValueFormat, err)
 		}
-		kv[prefix] = string(yamlData)
+		kv[prefix] = string(marshaledArray)
 	default:
 		kv[prefix] = rawData
 	}

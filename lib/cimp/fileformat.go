@@ -64,3 +64,27 @@ func UnmarshalWithFormat(format FileFormat, fileData []byte) (map[interface{}]in
 
 	return cfgRaw, nil
 }
+
+func MarshalWithFormat(format FileFormat, smth interface{}) ([]byte, error) {
+	var (
+		marshaled []byte
+		err       error
+	)
+
+	switch format {
+	case JSONFormat:
+		marshaled, err = json.Marshal(smth)
+	case YAMLFormat:
+		marshaled, err = yaml.Marshal(smth)
+	case EDNFormat:
+		marshaled, err = edn.Marshal(smth)
+	default:
+		return nil, fmt.Errorf("unsupported format: %v", format)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("marshal with format %q error: %w", format, err)
+	}
+
+	return marshaled, nil
+}
