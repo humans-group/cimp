@@ -21,7 +21,7 @@ func main() {
 	path, err := filepath.Abs(*pathRaw)
 	check(err)
 
-	format, err := cimp.InitFormat(*formatRaw, path)
+	format, err := cimp.NewFormat(*formatRaw, path)
 	check(err)
 
 	kv := cimp.NewKV()
@@ -29,7 +29,7 @@ func main() {
 
 	kv.AddPrefix(*prefixRaw)
 
-	storage, err := cimp.InitStorage(cimp.Config{Address: *consulEndpoint})
+	storage, err := cimp.NewStorage(cimp.Config{Address: *consulEndpoint})
 	check(err)
 
 	check(storage.Save(kv))

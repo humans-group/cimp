@@ -17,7 +17,7 @@ const (
 	EDNFormat  FileFormat = "edn"
 )
 
-func InitFormat(format, path string) (FileFormat, error) {
+func NewFormat(format, path string) (FileFormat, error) {
 	if len(format) > 1 {
 		switch FileFormat(format) {
 		case JSONFormat:

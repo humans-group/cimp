@@ -14,7 +14,7 @@ type ConsulStorage struct {
 	client *api.Client
 }
 
-func InitStorage(cfg Config) (*ConsulStorage, error) {
+func NewStorage(cfg Config) (*ConsulStorage, error) {
 	clientCfg := api.DefaultConfig()
 	clientCfg.Address = cfg.Address
 
