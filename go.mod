@@ -1,4 +1,4 @@
-module github.com/humans-group/consul-importer
+module github.com/humans-group/cimp
 
 go 1.15
 

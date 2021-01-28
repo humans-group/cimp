@@ -4,7 +4,7 @@ import (
 	"flag"
 	"path/filepath"
 
-	"github.com/humans-group/consul-importer/lib/cimp"
+	"github.com/humans-group/cimp/lib/cimp"
 )
 
 func main() {
