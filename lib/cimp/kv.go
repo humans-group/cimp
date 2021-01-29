@@ -6,18 +6,59 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hashicorp/consul/api"
 	"olympos.io/encoding/edn"
 )
 
-type KV map[string]interface{}
-
-func NewKV() KV {
-	kv := KV(make(map[string]interface{}))
-	return kv
+type Processable interface {
+	Process() error
 }
 
-func (kv KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
+type Processor interface {
+	Process(ProcessableLeaf) error
+}
+
+type KV struct {
+	Tree             ProcessableTree
+	Index            map[string]Path
+	ArrayValueFormat FileFormat
+	GlobalPrefix     string
+}
+
+type ProcessableTree map[string]Processable
+
+type Path []string
+
+type ProcessableLeaf struct {
+	Key   string
+	Value interface{}
+}
+
+type processFunc func(pl ProcessableLeaf, processor Processor) error
+
+const sep = "/"
+
+func (pt ProcessableTree) Process() error {
+	return nil
+}
+
+func (pt *ProcessableLeaf) Process() error {
+	return nil
+}
+
+func NewProcessableTree() ProcessableTree {
+	return make(map[string]Processable)
+}
+
+func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
+	return &KV{
+		Tree:             NewProcessableTree(),
+		Index:            make(map[string]Path),
+		ArrayValueFormat: arrayValueFormat,
+		GlobalPrefix:     prefix,
+	}
+}
+
+func (kv *KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
 	fileData, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read file data: %v", err)
@@ -28,74 +69,109 @@ func (kv KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileF
 		return fmt.Errorf("unmarshal %q-file: %w", format, err)
 	}
 
-	return kv.fillRecursive("", rawData, arrayValueFormat)
+	return kv.Tree.fillRecursive("", rawData, []string{}, kv)
 }
 
-func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
-	return kv.fillRecursive(prefix, rawData, arrayValueFormat)
+func (kv *KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
+	return kv.Tree.fillRecursive(prefix, rawData, []string{}, kv)
 }
 
-func (kv KV) Check(key string) bool {
-	_, ok := kv[key]
+func (kv *KV) Check(key string) bool {
+	_, ok := kv.Tree[key]
 	return ok
 }
 
 func (kv KV) GetString(key string) (string, error) {
-	value, ok := kv[key]
+	path, ok := kv.Index[key]
 	if !ok {
 		return "", fmt.Errorf("value %q: %w", key, ErrorNotFoundInKV)
 	}
 
-	switch typed := value.(type) {
-	case string:
-		return typed, nil
+	leaf, err := kv.Get(path)
+	if err != nil {
+		return "", fmt.Errorf("get by path: %w", err)
 	}
 
-	return "", fmt.Errorf("value %q: %w", key, ErrorTypeIncorrect)
+	switch value := leaf.Value.(type) {
+	case string:
+		return value, nil
+	default:
+		return "", fmt.Errorf("value %q: %w", key, ErrorTypeIncorrect)
+	}
 }
 
-func (kv KV) AddPair(pair api.KVPair) {
-	kv[pair.Key] = pair.Value
+func (kv KV) Get(path Path) (*ProcessableLeaf, error) {
+	if len(path) < 1 {
+		return nil, fmt.Errorf("path is empty")
+	}
+	curLevel := kv.Tree
+	for i, breadcrumb := range path {
+		if _, ok := curLevel[breadcrumb]; !ok {
+			return nil, fmt.Errorf("path %v is incorrect", path)
+		}
+		switch nextLevel := curLevel[breadcrumb].(type) {
+		case ProcessableTree:
+			curLevel = nextLevel
+			continue
+		case *ProcessableLeaf:
+			if i != len(path)-1 {
+				return nil, fmt.Errorf("path %v is too long", path)
+			}
+			return nextLevel, nil
+		default:
+			return nil, fmt.Errorf("tree value type %T is incorrect", nextLevel)
+		}
+	}
+
+	return nil, ErrorNotFoundInKV
 }
 
 func (kv KV) AddPrefix(prefix string) {
-	newKV := NewKV()
-	for key, value := range kv {
-		newKV[prefix+key] = value
-		delete(kv, key)
-	}
-	for key, value := range newKV {
-		kv[key] = value
-		delete(newKV, key)
-	}
+	kv.GlobalPrefix = prefix
 }
 
-func (kv KV) fillRecursive(prefix string, rawData interface{}, arrayValueFormat FileFormat) error {
-	switch data := rawData.(type) {
-	case map[interface{}]interface{}:
-		for key := range data {
-			stringKey, err := keyToString(prefix, key)
-			if err != nil {
-				return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
-			}
-			if err := kv.fillRecursive(stringKey, data[key], arrayValueFormat); err != nil {
+func (pt ProcessableTree) fillRecursive(prefix string, data map[interface{}]interface{}, path []string, kv *KV) error {
+	for key, rawValue := range data {
+		stringKey, err := keyToString(key)
+		if err != nil {
+			return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
+		}
+
+		newPath := make([]string, len(path)+1)
+		copy(path, newPath)
+		newPath[len(path)] = stringKey
+
+		fullKey := makeFullKey(prefix, stringKey)
+		switch value := rawValue.(type) {
+		case map[interface{}]interface{}:
+			childTree := NewProcessableTree()
+			if err := childTree.fillRecursive(fullKey, value, newPath, kv); err != nil {
 				return err
 			}
+			pt[stringKey] = childTree
+		case []interface{}:
+			marshaledArray, err := MarshalWithFormat(kv.ArrayValueFormat, data)
+			if err != nil {
+				return fmt.Errorf("marshal array %#v to %q: %w", data, kv.ArrayValueFormat, err)
+			}
+			pt[stringKey] = &ProcessableLeaf{
+				Key:   fullKey,
+				Value: string(marshaledArray),
+			}
+			kv.Index[stringKey] = newPath
+		default:
+			pt[stringKey] = &ProcessableLeaf{
+				Key:   fullKey,
+				Value: value,
+			}
+			kv.Index[stringKey] = newPath
 		}
-	case []interface{}:
-		marshaledArray, err := MarshalWithFormat(arrayValueFormat, data)
-		if err != nil {
-			return fmt.Errorf("marshal array %#v to %q: %w", data, arrayValueFormat, err)
-		}
-		kv[prefix] = string(marshaledArray)
-	default:
-		kv[prefix] = rawData
 	}
 
 	return nil
 }
 
-func keyToString(prefix string, key interface{}) (string, error) {
+func keyToString(key interface{}) (string, error) {
 	var result string
 
 	switch curKey := key.(type) {
@@ -118,13 +194,16 @@ func keyToString(prefix string, key interface{}) (string, error) {
 		return "", fmt.Errorf("invalid config key type: %#v", curKey)
 	}
 
-	result = ToSnakeCase(result)
+	return result, nil
+}
 
+func makeFullKey(key string, prefix string) string {
+	key = ToSnakeCase(key)
 	if len(prefix) > 0 {
-		result = prefix + "/" + result
+		key = prefix + "/" + key
 	}
 
-	return result, nil
+	return key
 }
 
 var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
