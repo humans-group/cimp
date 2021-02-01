@@ -28,7 +28,7 @@ func NewStorage(cfg Config) (*ConsulStorage, error) {
 	}, nil
 }
 
-func (cs *ConsulStorage) Save(kv KV) error {
+func (cs *ConsulStorage) Save(_ *KV) error {
 	// var ops api.TxnOps
 	// for key, path := range kv.Index {
 	// 	op := &api.TxnOp{
@@ -49,7 +49,7 @@ func (cs *ConsulStorage) Save(kv KV) error {
 	return nil
 }
 
-func (cs *ConsulStorage) Delete(kv KV) error {
+func (cs *ConsulStorage) Delete(kv *KV) error {
 	for k := range kv.Index {
 		_, err := cs.client.KV().Delete(k, nil)
 		if err != nil {

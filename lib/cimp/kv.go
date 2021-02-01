@@ -85,10 +85,26 @@ func (kv *KV) Check(key string) bool {
 	return ok
 }
 
-func (kv KV) GetString(key string) (string, error) {
+func (kv *KV) SetIfExist(key string, value interface{}) error {
 	path, ok := kv.Index[key]
 	if !ok {
-		return "", fmt.Errorf("value %q: %w", key, ErrorNotFoundInKV)
+		return fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
+	}
+
+	leaf, err := kv.Get(path)
+	if err != nil {
+		return fmt.Errorf("get by path: %w", err)
+	}
+
+	leaf.Value = value
+
+	return nil
+}
+
+func (kv *KV) GetString(key string) (string, error) {
+	path, ok := kv.Index[key]
+	if !ok {
+		return "", fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
 	}
 
 	leaf, err := kv.Get(path)
@@ -104,7 +120,7 @@ func (kv KV) GetString(key string) (string, error) {
 	}
 }
 
-func (kv KV) Get(path Path) (*ProcessableLeaf, error) {
+func (kv *KV) Get(path Path) (*ProcessableLeaf, error) {
 	if len(path) < 1 {
 		return nil, fmt.Errorf("path is empty")
 	}
@@ -130,7 +146,7 @@ func (kv KV) Get(path Path) (*ProcessableLeaf, error) {
 	return nil, ErrorNotFoundInKV
 }
 
-func (kv KV) AddPrefix(prefix string) {
+func (kv *KV) AddPrefix(prefix string) {
 	kv.GlobalPrefix = prefix
 }
 
