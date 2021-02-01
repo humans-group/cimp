@@ -28,8 +28,8 @@ func main() {
 	arrayValueFormat, err := cimp.NewFormat(*arrayValueFormatRaw, path)
 	check(err)
 
-	kv := cimp.NewKV()
-	check(kv.FillFromFile(path, format, arrayValueFormat))
+	kv := cimp.NewKV("", arrayValueFormat)
+	check(kv.FillFromFile(path, format))
 
 	kv.AddPrefix(*prefixRaw)
 

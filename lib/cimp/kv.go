@@ -36,7 +36,10 @@ type ProcessableLeaf struct {
 	Value interface{}
 }
 
-const sep = "/"
+const (
+	sep           = "/"
+	rootLevelName = ""
+)
 
 func (pt ProcessableTree) Process() error {
 	return nil
@@ -46,16 +49,16 @@ func (pt *ProcessableLeaf) Process() error {
 	return nil
 }
 
-func NewProcessableTree() *ProcessableTree {
+func NewProcessableTree(levelName string) *ProcessableTree {
 	return &ProcessableTree{
 		Tree:      make(map[string]Processable),
-		LevelName: "",
+		LevelName: levelName,
 	}
 }
 
 func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
 	return &KV{
-		KVTree:           NewProcessableTree(),
+		KVTree:           NewProcessableTree(rootLevelName),
 		Index:            make(map[string]Path),
 		ArrayValueFormat: arrayValueFormat,
 		GlobalPrefix:     prefix,
@@ -130,7 +133,7 @@ func (kv *KV) Get(path Path) (*ProcessableLeaf, error) {
 			return nil, fmt.Errorf("path %v is incorrect", path)
 		}
 		switch nextLevel := curLevel[breadcrumb].(type) {
-		case ProcessableTree:
+		case *ProcessableTree:
 			curLevel = nextLevel.Tree
 			continue
 		case *ProcessableLeaf:
@@ -150,7 +153,7 @@ func (kv *KV) AddPrefix(prefix string) {
 	kv.GlobalPrefix = prefix
 }
 
-func (pt ProcessableTree) fillRecursive(prefix string, data map[interface{}]interface{}, path []string, kv *KV) error {
+func (pt *ProcessableTree) fillRecursive(prefix string, data map[interface{}]interface{}, path []string, kv *KV) error {
 	for key, rawValue := range data {
 		stringKey, err := keyToString(key)
 		if err != nil {
@@ -158,13 +161,13 @@ func (pt ProcessableTree) fillRecursive(prefix string, data map[interface{}]inte
 		}
 
 		newPath := make([]string, len(path)+1)
-		copy(path, newPath)
+		copy(newPath, path)
 		newPath[len(path)] = stringKey
 
 		fullKey := makeFullKey(prefix, stringKey)
 		switch value := rawValue.(type) {
 		case map[interface{}]interface{}:
-			childTree := NewProcessableTree()
+			childTree := NewProcessableTree(stringKey)
 			if err := childTree.fillRecursive(fullKey, value, newPath, kv); err != nil {
 				return err
 			}
@@ -178,13 +181,13 @@ func (pt ProcessableTree) fillRecursive(prefix string, data map[interface{}]inte
 				Key:   fullKey,
 				Value: string(marshaledArray),
 			}
-			kv.Index[stringKey] = newPath
+			kv.Index[fullKey] = newPath
 		default:
 			pt.Tree[stringKey] = &ProcessableLeaf{
 				Key:   fullKey,
 				Value: value,
 			}
-			kv.Index[stringKey] = newPath
+			kv.Index[fullKey] = newPath
 		}
 	}
 
@@ -217,7 +220,7 @@ func keyToString(key interface{}) (string, error) {
 	return result, nil
 }
 
-func makeFullKey(key string, prefix string) string {
+func makeFullKey(prefix string, key string) string {
 	key = ToSnakeCase(key)
 	if len(prefix) > 0 {
 		key = prefix + sep + key
