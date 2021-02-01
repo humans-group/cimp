@@ -18,13 +18,16 @@ type Processor interface {
 }
 
 type KV struct {
-	Tree             ProcessableTree
+	KVTree           *ProcessableTree
 	Index            map[string]Path
 	ArrayValueFormat FileFormat
 	GlobalPrefix     string
 }
 
-type ProcessableTree map[string]Processable
+type ProcessableTree struct {
+	Tree      map[string]Processable
+	LevelName string
+}
 
 type Path []string
 
@@ -32,8 +35,6 @@ type ProcessableLeaf struct {
 	Key   string
 	Value interface{}
 }
-
-type processFunc func(pl ProcessableLeaf, processor Processor) error
 
 const sep = "/"
 
@@ -45,20 +46,23 @@ func (pt *ProcessableLeaf) Process() error {
 	return nil
 }
 
-func NewProcessableTree() ProcessableTree {
-	return make(map[string]Processable)
+func NewProcessableTree() *ProcessableTree {
+	return &ProcessableTree{
+		Tree:      make(map[string]Processable),
+		LevelName: "",
+	}
 }
 
 func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
 	return &KV{
-		Tree:             NewProcessableTree(),
+		KVTree:           NewProcessableTree(),
 		Index:            make(map[string]Path),
 		ArrayValueFormat: arrayValueFormat,
 		GlobalPrefix:     prefix,
 	}
 }
 
-func (kv *KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
+func (kv *KV) FillFromFile(path string, format FileFormat) error {
 	fileData, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read file data: %v", err)
@@ -69,15 +73,15 @@ func (kv *KV) FillFromFile(path string, format FileFormat, arrayValueFormat File
 		return fmt.Errorf("unmarshal %q-file: %w", format, err)
 	}
 
-	return kv.Tree.fillRecursive("", rawData, []string{}, kv)
+	return kv.KVTree.fillRecursive("", rawData, []string{}, kv)
 }
 
-func (kv *KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
-	return kv.Tree.fillRecursive(prefix, rawData, []string{}, kv)
+func (kv *KV) Fill(prefix string, rawData map[interface{}]interface{}) error {
+	return kv.KVTree.fillRecursive(prefix, rawData, []string{}, kv)
 }
 
 func (kv *KV) Check(key string) bool {
-	_, ok := kv.Tree[key]
+	_, ok := kv.Index[key]
 	return ok
 }
 
@@ -104,14 +108,14 @@ func (kv KV) Get(path Path) (*ProcessableLeaf, error) {
 	if len(path) < 1 {
 		return nil, fmt.Errorf("path is empty")
 	}
-	curLevel := kv.Tree
+	curLevel := kv.KVTree.Tree
 	for i, breadcrumb := range path {
 		if _, ok := curLevel[breadcrumb]; !ok {
 			return nil, fmt.Errorf("path %v is incorrect", path)
 		}
 		switch nextLevel := curLevel[breadcrumb].(type) {
 		case ProcessableTree:
-			curLevel = nextLevel
+			curLevel = nextLevel.Tree
 			continue
 		case *ProcessableLeaf:
 			if i != len(path)-1 {
@@ -148,19 +152,19 @@ func (pt ProcessableTree) fillRecursive(prefix string, data map[interface{}]inte
 			if err := childTree.fillRecursive(fullKey, value, newPath, kv); err != nil {
 				return err
 			}
-			pt[stringKey] = childTree
+			pt.Tree[stringKey] = childTree
 		case []interface{}:
 			marshaledArray, err := MarshalWithFormat(kv.ArrayValueFormat, data)
 			if err != nil {
 				return fmt.Errorf("marshal array %#v to %q: %w", data, kv.ArrayValueFormat, err)
 			}
-			pt[stringKey] = &ProcessableLeaf{
+			pt.Tree[stringKey] = &ProcessableLeaf{
 				Key:   fullKey,
 				Value: string(marshaledArray),
 			}
 			kv.Index[stringKey] = newPath
 		default:
-			pt[stringKey] = &ProcessableLeaf{
+			pt.Tree[stringKey] = &ProcessableLeaf{
 				Key:   fullKey,
 				Value: value,
 			}
@@ -200,7 +204,7 @@ func keyToString(key interface{}) (string, error) {
 func makeFullKey(key string, prefix string) string {
 	key = ToSnakeCase(key)
 	if len(prefix) > 0 {
-		key = prefix + "/" + key
+		key = prefix + sep + key
 	}
 
 	return key
