@@ -3,9 +3,9 @@ package cimp
 import (
 	"fmt"
 	"io/ioutil"
+	"regexp"
 	"strings"
 
-	"github.com/go-yaml/yaml"
 	"github.com/hashicorp/consul/api"
 	"olympos.io/encoding/edn"
 )
@@ -17,7 +17,7 @@ func NewKV() KV {
 	return kv
 }
 
-func (kv KV) FillFromFile(path string, format FileFormat) error {
+func (kv KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
 	fileData, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read file data: %v", err)
@@ -28,11 +28,11 @@ func (kv KV) FillFromFile(path string, format FileFormat) error {
 		return fmt.Errorf("unmarshal %q-file: %w", format, err)
 	}
 
-	return kv.fillRecursive("", rawData)
+	return kv.fillRecursive("", rawData, arrayValueFormat)
 }
 
-func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}) error {
-	return kv.fillRecursive(prefix, rawData)
+func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
+	return kv.fillRecursive(prefix, rawData, arrayValueFormat)
 }
 
 func (kv KV) Check(key string) bool {
@@ -70,7 +70,7 @@ func (kv KV) AddPrefix(prefix string) {
 	}
 }
 
-func (kv KV) fillRecursive(prefix string, rawData interface{}) error {
+func (kv KV) fillRecursive(prefix string, rawData interface{}, arrayValueFormat FileFormat) error {
 	switch data := rawData.(type) {
 	case map[interface{}]interface{}:
 		for key := range data {
@@ -78,16 +78,16 @@ func (kv KV) fillRecursive(prefix string, rawData interface{}) error {
 			if err != nil {
 				return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
 			}
-			if err := kv.fillRecursive(stringKey, data[key]); err != nil {
+			if err := kv.fillRecursive(stringKey, data[key], arrayValueFormat); err != nil {
 				return err
 			}
 		}
 	case []interface{}:
-		yamlData, err := yaml.Marshal(data)
+		marshaledArray, err := MarshalWithFormat(arrayValueFormat, data)
 		if err != nil {
-			return fmt.Errorf("marshal array %#v to yaml: %w", data, err)
+			return fmt.Errorf("marshal array %#v to %q: %w", data, arrayValueFormat, err)
 		}
-		kv[prefix] = string(yamlData)
+		kv[prefix] = string(marshaledArray)
 	default:
 		kv[prefix] = rawData
 	}
@@ -97,29 +97,47 @@ func (kv KV) fillRecursive(prefix string, rawData interface{}) error {
 
 func keyToString(prefix string, key interface{}) (string, error) {
 	var result string
-	if len(prefix) > 0 {
-		result = prefix + "/"
-	}
 
 	switch curKey := key.(type) {
 	case string:
-		result += curKey
+		result = curKey
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		result += fmt.Sprintf("%d", curKey)
+		result = fmt.Sprintf("%d", curKey)
 	case float32, float64:
-		result += fmt.Sprintf("%f", curKey)
+		result = fmt.Sprintf("%f", curKey)
 	case bool:
-		result += fmt.Sprintf("%t", curKey)
+		result = fmt.Sprintf("%t", curKey)
 	case edn.Keyword:
 		strKey := curKey.String()
 		if len(strKey) < 1 {
 			return "", fmt.Errorf("edn-key %#v is empty or not stringable", key)
 		}
 		// remove `:` from beginning of the key
-		result += fmt.Sprintf("%s", strKey[1:])
+		result = fmt.Sprintf("%s", strKey[1:])
 	default:
 		return "", fmt.Errorf("invalid config key type: %#v", curKey)
 	}
 
-	return strings.ToLower(result), nil
+	result = ToSnakeCase(result)
+
+	if len(prefix) > 0 {
+		result = prefix + "/" + result
+	}
+
+	return result, nil
+}
+
+var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
+var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+var matchAllSpecSymbols = regexp.MustCompile("[^A-z0-9]")
+var matchAllMultipleUnderscore = regexp.MustCompile("[_]{2,}")
+
+func ToSnakeCase(str string) string {
+	str = matchAllSpecSymbols.ReplaceAllString(str, "_")
+	str = matchFirstCap.ReplaceAllString(str, "${1}_${2}")
+	str = matchAllCap.ReplaceAllString(str, "${1}_${2}")
+	str = matchAllMultipleUnderscore.ReplaceAllString(str, "_")
+	str = strings.Trim(str, "_")
+
+	return strings.ToLower(str)
 }
