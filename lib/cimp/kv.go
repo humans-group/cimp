@@ -5,8 +5,6 @@ import (
 	"io/ioutil"
 	"regexp"
 	"strings"
-
-	"olympos.io/encoding/edn"
 )
 
 type Processable interface {
@@ -27,18 +25,20 @@ type KV struct {
 type ProcessableTree struct {
 	Tree      map[string]Processable
 	LevelName string
+	Order     []string // TODO: order not working in marshalling/unmarshalling. Try to make it with Decoder
 }
 
 type Path []string
 
 type ProcessableLeaf struct {
-	Key   string
-	Value interface{}
+	FullKey string
+	Value   interface{}
 }
 
 const (
-	sep           = "/"
-	rootLevelName = ""
+	sep                       = "/"
+	rootLevelName             = ""
+	keyTemplateForMarshalling = "{{key}}"
 )
 
 func (pt ProcessableTree) Process() error {
@@ -68,19 +68,19 @@ func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
 func (kv *KV) FillFromFile(path string, format FileFormat) error {
 	fileData, err := ioutil.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read file data: %v", err)
+		return fmt.Errorf("read file data: %w", err)
 	}
 
-	rawData, err := UnmarshalWithFormat(format, fileData)
-	if err != nil {
-		return fmt.Errorf("unmarshal %q-file: %w", format, err)
+	marshaller := NewUnmarshaler(kv, format)
+	if err := marshaller.Unmarshal(fileData); err != nil {
+		return fmt.Errorf("unmarshal file data: %w", err)
 	}
 
-	return kv.KVTree.fillRecursive("", rawData, []string{}, kv)
+	return nil
 }
 
-func (kv *KV) Fill(prefix string, rawData map[interface{}]interface{}) error {
-	return kv.KVTree.fillRecursive(prefix, rawData, []string{}, kv)
+func (kv *KV) Fill(prefix string, rawData map[string]interface{}) error {
+	return kv.KVTree.importRecursive(prefix, rawData, []string{}, kv)
 }
 
 func (kv *KV) Check(key string) bool {
@@ -91,10 +91,10 @@ func (kv *KV) Check(key string) bool {
 func (kv *KV) SetIfExist(key string, value interface{}) error {
 	path, ok := kv.Index[key]
 	if !ok {
-		return fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
+		return nil
 	}
 
-	leaf, err := kv.Get(path)
+	leaf, err := kv.get(path)
 	if err != nil {
 		return fmt.Errorf("get by path: %w", err)
 	}
@@ -110,7 +110,7 @@ func (kv *KV) GetString(key string) (string, error) {
 		return "", fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
 	}
 
-	leaf, err := kv.Get(path)
+	leaf, err := kv.get(path)
 	if err != nil {
 		return "", fmt.Errorf("get by path: %w", err)
 	}
@@ -123,7 +123,7 @@ func (kv *KV) GetString(key string) (string, error) {
 	}
 }
 
-func (kv *KV) Get(path Path) (*ProcessableLeaf, error) {
+func (kv *KV) get(path Path) (*ProcessableLeaf, error) {
 	if len(path) < 1 {
 		return nil, fmt.Errorf("path is empty")
 	}
@@ -150,42 +150,43 @@ func (kv *KV) Get(path Path) (*ProcessableLeaf, error) {
 }
 
 func (kv *KV) AddPrefix(prefix string) {
+	if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
+		prefix = prefix + "/"
+	}
 	kv.GlobalPrefix = prefix
 }
 
-func (pt *ProcessableTree) fillRecursive(prefix string, data map[interface{}]interface{}, path []string, kv *KV) error {
+func (pt *ProcessableTree) importRecursive(prefix string, data map[string]interface{}, path []string, kv *KV) error {
 	for key, rawValue := range data {
-		stringKey, err := keyToString(key)
-		if err != nil {
-			return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
-		}
+		pt.Order = append(pt.Order, key)
 
 		newPath := make([]string, len(path)+1)
 		copy(newPath, path)
-		newPath[len(path)] = stringKey
+		newPath[len(path)] = key
 
-		fullKey := makeFullKey(prefix, stringKey)
+		fullKey := makeFullKey(prefix, key)
+
 		switch value := rawValue.(type) {
-		case map[interface{}]interface{}:
-			childTree := NewProcessableTree(stringKey)
-			if err := childTree.fillRecursive(fullKey, value, newPath, kv); err != nil {
+		case map[string]interface{}:
+			childTree := NewProcessableTree(key)
+			if err := childTree.importRecursive(fullKey, value, newPath, kv); err != nil {
 				return err
 			}
-			pt.Tree[stringKey] = childTree
+			pt.Tree[key] = childTree
 		case []interface{}:
-			marshaledArray, err := MarshalWithFormat(kv.ArrayValueFormat, data)
+			marshaledArray, err := MarshalWithFormat(kv.ArrayValueFormat, value)
 			if err != nil {
-				return fmt.Errorf("marshal array %#v to %q: %w", data, kv.ArrayValueFormat, err)
+				return fmt.Errorf("marshal array %#v to %q: %w", value, kv.ArrayValueFormat, err)
 			}
-			pt.Tree[stringKey] = &ProcessableLeaf{
-				Key:   fullKey,
-				Value: string(marshaledArray),
+			pt.Tree[key] = &ProcessableLeaf{
+				FullKey: fullKey,
+				Value:   string(marshaledArray),
 			}
 			kv.Index[fullKey] = newPath
 		default:
-			pt.Tree[stringKey] = &ProcessableLeaf{
-				Key:   fullKey,
-				Value: value,
+			pt.Tree[key] = &ProcessableLeaf{
+				FullKey: fullKey,
+				Value:   value,
 			}
 			kv.Index[fullKey] = newPath
 		}
@@ -194,30 +195,29 @@ func (pt *ProcessableTree) fillRecursive(prefix string, data map[interface{}]int
 	return nil
 }
 
-func keyToString(key interface{}) (string, error) {
-	var result string
-
-	switch curKey := key.(type) {
-	case string:
-		result = curKey
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		result = fmt.Sprintf("%d", curKey)
-	case float32, float64:
-		result = fmt.Sprintf("%f", curKey)
-	case bool:
-		result = fmt.Sprintf("%t", curKey)
-	case edn.Keyword:
-		strKey := curKey.String()
-		if len(strKey) < 1 {
-			return "", fmt.Errorf("edn-key %#v is empty or not stringable", key)
+func (pt *ProcessableTree) exportRecursive(to map[string]interface{}, m *kvMarshaler) {
+	for _, key := range pt.Order {
+		val := pt.Tree[key]
+		if m.toSnakeCase {
+			key = ToSnakeCase(key)
 		}
-		// remove `:` from beginning of the key
-		result = fmt.Sprintf("%s", strKey[1:])
-	default:
-		return "", fmt.Errorf("invalid config key type: %#v", curKey)
-	}
+		if len(m.keyPrefix) > 0 {
+			key = m.keyPrefix + key
+		}
 
-	return result, nil
+		switch value := val.(type) {
+		case *ProcessableTree:
+			newLevel := make(map[string]interface{})
+			value.exportRecursive(newLevel, m)
+			to[key] = newLevel
+		case *ProcessableLeaf:
+			if m.toTemplate {
+				to[key] = strings.ReplaceAll(m.template, keyTemplateForMarshalling, value.FullKey)
+				continue
+			}
+			to[key] = value.Value
+		}
+	}
 }
 
 func makeFullKey(prefix string, key string) string {

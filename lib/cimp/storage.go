@@ -14,6 +14,8 @@ type ConsulStorage struct {
 	client *api.Client
 }
 
+const consulTransactionLimit = 64
+
 func NewStorage(cfg Config) (*ConsulStorage, error) {
 	clientCfg := api.DefaultConfig()
 	clientCfg.Address = cfg.Address
@@ -28,23 +30,37 @@ func NewStorage(cfg Config) (*ConsulStorage, error) {
 	}, nil
 }
 
-func (cs *ConsulStorage) Save(_ *KV) error {
-	// var ops api.TxnOps
-	// for key, path := range kv.Index {
-	// 	op := &api.TxnOp{
-	// 		KV: &api.KVTxnOp{
-	// 			Verb:  api.KVSet,
-	// 			Key:   key,
-	// 			Value: []byte(fmt.Sprintf("%v", v)),
-	// 		},
-	// 	}
-	// 	ops = append(ops, op)
-	// }
-	//
-	// ok, _, _, err := cs.client.Txn().Txn(ops, nil)
-	// if !ok {
-	// 	return fmt.Errorf("execute consul SET-transaction: %w", err)
-	// }
+func (cs *ConsulStorage) Save(kv *KV) error {
+	var ops api.TxnOps
+
+	var i int
+	for key, path := range kv.Index {
+		i++
+		leaf, err := kv.get(path)
+		if err != nil {
+			return fmt.Errorf("get key %q value from tree: %w", key, err)
+		}
+
+		op := &api.TxnOp{
+			KV: &api.KVTxnOp{
+				Verb:  api.KVSet,
+				Key:   kv.GlobalPrefix + key,
+				Value: []byte(fmt.Sprintf("%v", leaf.Value)),
+			},
+		}
+		ops = append(ops, op)
+
+		if len(ops) == consulTransactionLimit || i == len(kv.Index) {
+			if ok, _, _, err := cs.client.Txn().Txn(ops, nil); !ok {
+				return fmt.Errorf("execute consul SET-transaction: %w", err)
+			}
+			ops = nil
+		}
+	}
+
+	if ok, _, _, err := cs.client.Txn().Txn(ops, nil); !ok {
+		return fmt.Errorf("execute consul SET-transaction: %w", err)
+	}
 
 	return nil
 }

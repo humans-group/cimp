@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/go-yaml/yaml"
+	"gopkg.in/yaml.v3"
 	"olympos.io/encoding/edn"
 )
 
@@ -41,28 +41,6 @@ func NewFormat(format, path string) (FileFormat, error) {
 	}
 
 	return YAMLFormat, nil
-}
-
-func UnmarshalWithFormat(format FileFormat, fileData []byte) (map[interface{}]interface{}, error) {
-	cfgRaw := make(map[interface{}]interface{})
-	var err error
-
-	switch format {
-	case JSONFormat:
-		err = json.Unmarshal(fileData, &cfgRaw)
-	case YAMLFormat:
-		err = yaml.Unmarshal(fileData, &cfgRaw)
-	case EDNFormat:
-		err = edn.Unmarshal(fileData, &cfgRaw)
-	default:
-		return nil, fmt.Errorf("unsupported format: %v", format)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("unmarshal with format %q error: %w", format, err)
-	}
-
-	return cfgRaw, nil
 }
 
 func MarshalWithFormat(format FileFormat, smth interface{}) ([]byte, error) {
