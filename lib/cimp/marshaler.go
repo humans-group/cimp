@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"gopkg.in/yaml.v3"
-	"olympos.io/encoding/edn"
 )
 
 type Marshaler interface {
@@ -56,8 +55,6 @@ func (m *kvMarshaler) Marshal() ([]byte, error) {
 		bytes, err = json.Marshal(raw)
 	case YAMLFormat:
 		bytes, err = yaml.Marshal(raw)
-	case EDNFormat:
-		bytes, err = edn.Marshal(raw)
 	default:
 		return nil, fmt.Errorf("unsupported format: %v", m.format)
 	}
@@ -70,23 +67,112 @@ func (m *kvMarshaler) Marshal() ([]byte, error) {
 }
 
 func (m *kvMarshaler) Unmarshal(raw []byte) error {
-	cfgRaw := make(map[string]interface{})
-	var err error
-
 	switch m.format {
 	case JSONFormat:
-		err = json.Unmarshal(raw, &cfgRaw)
+		return fmt.Errorf("isn't available")
 	case YAMLFormat:
-		err = yaml.Unmarshal(raw, &cfgRaw)
-	case EDNFormat:
-		err = edn.Unmarshal(raw, &cfgRaw)
+		return yaml.Unmarshal(raw, &m.kv.KVTree)
 	default:
 		return fmt.Errorf("unsupported format: %v", m.format)
 	}
+}
 
-	if err != nil {
-		return fmt.Errorf("unmarshal with format %q: %w", m.format, err)
+func (pt *MarshalableTree) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("yaml node should have Mapping kind for unmarshal, not %v", node.Kind)
 	}
 
-	return m.kv.KVTree.importRecursive("", cfgRaw, []string{}, m.kv)
+	for i := 0; i < len(node.Content); i += 2 {
+		curKey := node.Content[i].Value
+		curNode := node.Content[i+1]
+
+		switch curNode.Kind {
+		case yaml.ScalarNode:
+			leaf := &MarshalableLeaf{
+				FullKey: makeFullKey(pt.fullKey, curKey),
+				Name:    curKey,
+				Value:   curNode.Value,
+			}
+			pt.add(curKey, leaf)
+		case yaml.MappingNode:
+			childTree := NewMarshalableTree(curKey, pt.fullKey)
+			if err := childTree.UnmarshalYAML(curNode); err != nil {
+				return fmt.Errorf("unmarshal %q: %w", curKey, err)
+			}
+			pt.add(curKey, childTree)
+		case yaml.SequenceNode:
+			leafValue, err := yaml.Marshal(curNode)
+			if err != nil {
+				return fmt.Errorf("marshal sequence %q: %w", curKey, err)
+			}
+			leaf := &MarshalableLeaf{
+				FullKey: makeFullKey(pt.fullKey, curKey),
+				Value:   string(leafValue),
+			}
+			pt.add(curKey, leaf)
+		default:
+			return fmt.Errorf("unprocessable content type of %q: %v", curKey, curNode.Kind)
+		}
+	}
+
+	return nil
+}
+
+func (pl *MarshalableLeaf) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		pl.Value = node.Value
+	case yaml.SequenceNode:
+		leafValue, err := yaml.Marshal(node)
+		if err != nil {
+			return fmt.Errorf("marshal sequence %q: %w", pl.FullKey, err)
+		}
+		pl.Value = string(leafValue)
+	default:
+		return fmt.Errorf("unprocessable content type `%v` for leaf %q", node.Kind, pl.FullKey)
+	}
+
+	return nil
+}
+
+func (pt *MarshalableTree) ToYAMLNode() (*yaml.Node, error) {
+	var content []*yaml.Node
+	for _, leafName := range pt.Order {
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode}
+
+		if err := keyNode.Encode(leafName); err != nil {
+			return nil, fmt.Errorf("encode node %q: %w", leafName, err)
+		}
+		content = append(content, keyNode)
+
+		valueNode, err := pt.Tree[leafName].ToYAMLNode()
+		if err != nil {
+			return nil, fmt.Errorf("convert %q to YAML-node: %w", leafName, err)
+		}
+		content = append(content, valueNode)
+	}
+
+	return &yaml.Node{
+		Kind:    yaml.MappingNode,
+		Style:   0,
+		Value:   pt.Name,
+		Content: content,
+		Line:    1,
+		Column:  1,
+	}, nil
+}
+
+func (pl *MarshalableLeaf) ToYAMLNode() (*yaml.Node, error) {
+	return &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: fmt.Sprint(pl.Value),
+	}, nil
+}
+
+func (pt *MarshalableTree) UnmarshalJSON([]byte) error {
+	return nil
+}
+
+func (pt *MarshalableTree) MarshalJSON() ([]byte, error) {
+	return nil, nil
 }
