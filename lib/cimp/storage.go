@@ -36,7 +36,7 @@ func (cs *ConsulStorage) Save(kv *KV) error {
 	var i int
 	for key, path := range kv.Index {
 		i++
-		leaf, err := kv.get(path)
+		leaf, err := kv.Tree.Get(path)
 		if err != nil {
 			return fmt.Errorf("get key %q value from tree: %w", key, err)
 		}

@@ -4,47 +4,24 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"gopkg.in/yaml.v3"
+	"github.com/humans-group/cimp/lib/tree"
 )
 
-// TODO: add the same for JSON if it'll be needed
-type Marshalable interface {
-	ToYAMLNode() (*yaml.Node, error)
-	UnmarshalYAML(value *yaml.Node) error
-}
-
 type KV struct {
-	KVTree           *MarshalableTree
-	Index            map[string]Path
+	Tree             *tree.Tree
+	Index            map[string]tree.Path
 	ArrayValueFormat FileFormat
 	GlobalPrefix     string
 }
 
-type MarshalableTree struct {
-	Tree    map[string]Marshalable
-	Name    string
-	Order   []string
-	fullKey string
-}
-
-type MarshalableLeaf struct {
-	FullKey string
-	Name    string
-	Value   interface{}
-}
-
-type Path []string
-
 const (
-	sep                       = "/"
-	rootLevelName             = ""
-	keyTemplateForMarshalling = "{{key}}"
+	rootLevelName = ""
 )
 
 func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
 	return &KV{
-		KVTree:           NewMarshalableTree(rootLevelName, ""),
-		Index:            make(map[string]Path),
+		Tree:             tree.NewSubTree(rootLevelName, ""),
+		Index:            make(map[string]tree.Path),
 		ArrayValueFormat: arrayValueFormat,
 		GlobalPrefix:     prefix,
 	}
@@ -75,7 +52,7 @@ func (kv *KV) SetIfExist(key string, value interface{}) error {
 		return nil
 	}
 
-	leaf, err := kv.get(path)
+	leaf, err := kv.Tree.Get(path)
 	if err != nil {
 		return fmt.Errorf("get by path: %w", err)
 	}
@@ -91,7 +68,7 @@ func (kv *KV) GetString(key string) (string, error) {
 		return "", fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
 	}
 
-	leaf, err := kv.get(path)
+	leaf, err := kv.Tree.Get(path)
 	if err != nil {
 		return "", fmt.Errorf("get by path: %w", err)
 	}
@@ -109,30 +86,4 @@ func (kv *KV) AddPrefix(prefix string) {
 		prefix = prefix + "/"
 	}
 	kv.GlobalPrefix = prefix
-}
-
-func (kv *KV) get(path Path) (*MarshalableLeaf, error) {
-	if len(path) < 1 {
-		return nil, fmt.Errorf("path is empty")
-	}
-	curLevel := kv.KVTree.Tree
-	for i, breadcrumb := range path {
-		if _, ok := curLevel[breadcrumb]; !ok {
-			return nil, fmt.Errorf("path %v is incorrect", path)
-		}
-		switch nextLevel := curLevel[breadcrumb].(type) {
-		case *MarshalableTree:
-			curLevel = nextLevel.Tree
-			continue
-		case *MarshalableLeaf:
-			if i != len(path)-1 {
-				return nil, fmt.Errorf("path %v is too long", path)
-			}
-			return nextLevel, nil
-		default:
-			return nil, fmt.Errorf("tree value type %T is incorrect", nextLevel)
-		}
-	}
-
-	return nil, ErrorNotFoundInKV
 }

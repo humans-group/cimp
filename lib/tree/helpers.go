@@ -1,11 +1,13 @@
-package cimp
+package tree
 
 import (
 	"regexp"
 	"strings"
 )
 
-func makeFullKey(prefix string, key string) string {
+const sep = "/"
+
+func MakeFullKey(prefix string, key string) string {
 	key = ToSnakeCase(key)
 	if len(prefix) > 0 {
 		key = prefix + sep + key
