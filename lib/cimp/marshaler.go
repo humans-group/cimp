@@ -49,9 +49,9 @@ func (m *kvMarshaler) Marshal() ([]byte, error) {
 	)
 	switch m.format {
 	case JSONFormat:
-		byteList, err = json.Marshal(m.kv.Tree)
+		byteList, err = json.Marshal(m.kv.tree)
 	case YAMLFormat:
-		byteList, err = yaml.Marshal(m.kv.Tree)
+		byteList, err = yaml.Marshal(m.kv.tree)
 	default:
 		return nil, fmt.Errorf("unsupported format: %v", m.format)
 	}
@@ -68,7 +68,7 @@ func (m *kvMarshaler) Unmarshal(raw []byte) error {
 	case JSONFormat:
 		return fmt.Errorf("isn't available")
 	case YAMLFormat:
-		return yaml.Unmarshal(raw, &m.kv.Tree)
+		return yaml.Unmarshal(raw, &m.kv.tree)
 	default:
 		return fmt.Errorf("unsupported format: %v", m.format)
 	}

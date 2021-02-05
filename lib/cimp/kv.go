@@ -8,10 +8,10 @@ import (
 )
 
 type KV struct {
-	Tree             *tree.Tree
-	Index            map[string]tree.Path
-	ArrayValueFormat FileFormat
-	GlobalPrefix     string
+	tree             *tree.Tree
+	index            map[string]tree.Path
+	arrayValueFormat FileFormat
+	globalPrefix     string
 }
 
 const (
@@ -20,10 +20,10 @@ const (
 
 func NewKV(prefix string, arrayValueFormat FileFormat) *KV {
 	return &KV{
-		Tree:             tree.NewSubTree(rootLevelName, ""),
-		Index:            make(map[string]tree.Path),
-		ArrayValueFormat: arrayValueFormat,
-		GlobalPrefix:     prefix,
+		tree:             tree.NewSubTree(rootLevelName, ""),
+		index:            make(map[string]tree.Path),
+		arrayValueFormat: arrayValueFormat,
+		globalPrefix:     prefix,
 	}
 }
 
@@ -42,17 +42,17 @@ func (kv *KV) FillFromFile(path string, format FileFormat) error {
 }
 
 func (kv *KV) Check(key string) bool {
-	_, ok := kv.Index[key]
+	_, ok := kv.index[key]
 	return ok
 }
 
 func (kv *KV) SetIfExist(key string, value interface{}) error {
-	path, ok := kv.Index[key]
+	path, ok := kv.index[key]
 	if !ok {
 		return nil
 	}
 
-	leaf, err := kv.Tree.Get(path)
+	leaf, err := kv.tree.Get(path)
 	if err != nil {
 		return fmt.Errorf("get by path: %w", err)
 	}
@@ -63,12 +63,12 @@ func (kv *KV) SetIfExist(key string, value interface{}) error {
 }
 
 func (kv *KV) GetString(key string) (string, error) {
-	path, ok := kv.Index[key]
+	path, ok := kv.index[key]
 	if !ok {
 		return "", fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
 	}
 
-	leaf, err := kv.Tree.Get(path)
+	leaf, err := kv.tree.Get(path)
 	if err != nil {
 		return "", fmt.Errorf("get by path: %w", err)
 	}
@@ -85,5 +85,5 @@ func (kv *KV) AddPrefix(prefix string) {
 	if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
 		prefix = prefix + "/"
 	}
-	kv.GlobalPrefix = prefix
+	kv.globalPrefix = prefix
 }
