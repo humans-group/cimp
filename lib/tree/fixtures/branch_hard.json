@@ -1,0 +1,28 @@
+[
+  {
+    "Name": "SomeName",
+    "Address": "127.1.1.1",
+    "Port": 80,
+    "Start": true
+  },
+  3,
+  false,
+  "true",
+  16.466,
+  {
+    "Level1": "First",
+    "Level2": [
+      "Two",
+      2
+    ],
+    "false": {
+      "3": 18.7
+    },
+    "": [
+      "Some",
+      "other",
+      false,
+      "things"
+    ]
+  }
+]

@@ -121,7 +121,7 @@ func (mb *Branch) UnmarshalJSON(raw []byte) error {
 		raw = bytes.TrimSpace(raw)
 		dec := json.NewDecoder(bytes.NewReader(raw))
 
-		token, err := mb.decoder.Token()
+		token, err := dec.Token()
 		if err != nil {
 			return fmt.Errorf("get next token from decoder: %w", err)
 		}
@@ -149,7 +149,7 @@ func (mb *Branch) UnmarshalJSON(raw []byte) error {
 		if !ok {
 			leaf := NewLeaf(name, mb.fullKey)
 			leaf.decoder = mb.decoder
-			leaf.Value = token.(string)
+			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
@@ -225,7 +225,7 @@ func (mt *Tree) UnmarshalJSON(raw []byte) error {
 		if !ok {
 			leaf := NewLeaf(name, mt.fullKey)
 			leaf.decoder = mt.decoder
-			leaf.Value = token.(string)
+			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
