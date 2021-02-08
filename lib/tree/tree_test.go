@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/afero"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,7 +46,7 @@ func TestTree_MarshalYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create file path of file %q: %v", fileName, err)
 		}
-		expRaw, err := afero.ReadFile(afero.NewOsFs(), filePath)
+		expRaw, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("read file %q: %v", filePath, err)
 		}
@@ -102,7 +102,7 @@ func TestTree_MarshalJSON(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create file path of file %q: %v", fileName, err)
 		}
-		expRaw, err := afero.ReadFile(afero.NewOsFs(), filePath)
+		expRaw, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("read file %q: %v", filePath, err)
 		}
@@ -160,7 +160,7 @@ func TestTree_UnmarshalYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create file path of file %q: %v", fileName, err)
 		}
-		expRaw, err := afero.ReadFile(afero.NewOsFs(), filePath)
+		expRaw, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("read file %q: %v", filePath, err)
 		}
@@ -219,7 +219,7 @@ func TestTree_UnmarshalJSON(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create file path of file %q: %v", fileName, err)
 		}
-		expRaw, err := afero.ReadFile(afero.NewOsFs(), filePath)
+		expRaw, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("read file %q: %v", filePath, err)
 		}
