@@ -100,7 +100,7 @@ func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
 	mt.Content[name] = value
 }
 
-func (mt *Tree) Clone() *Tree {
+func (mt *Tree) ShallowClone() *Tree {
 	newOrder := make([]string, len(mt.Order))
 	copy(newOrder, mt.Order)
 
