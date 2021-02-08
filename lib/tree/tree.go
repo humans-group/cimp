@@ -18,14 +18,14 @@ type Tree struct {
 	Content map[string]Marshalable
 	Name    string
 	Order   []string
-	fullKey string
+	FullKey string
 	decoder *json.Decoder
 }
 
 type Branch struct {
 	Content []Marshalable
 	Name    string
-	fullKey string
+	FullKey string
 	decoder *json.Decoder
 }
 
@@ -48,7 +48,7 @@ func NewSubTree(name, prefix string) *Tree {
 	return &Tree{
 		Content: make(map[string]Marshalable),
 		Name:    name,
-		fullKey: MakeFullKey(prefix, name),
+		FullKey: MakeFullKey(prefix, name),
 	}
 }
 
@@ -56,7 +56,7 @@ func NewBranch(name, prefix string) *Branch {
 	return &Branch{
 		Content: []Marshalable{},
 		Name:    name,
-		fullKey: MakeFullKey(prefix, name),
+		FullKey: MakeFullKey(prefix, name),
 	}
 }
 
@@ -93,9 +93,31 @@ func (mt *Tree) Get(path Path) (*Leaf, error) {
 	return nil, ErrorNotFound
 }
 
-func (mt *Tree) AddDirectly(name string, value Marshalable) {
-	mt.Order = append(mt.Order, name)
+func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
+	if _, ok := mt.Content[name]; !ok {
+		mt.Order = append(mt.Order, name)
+	}
 	mt.Content[name] = value
+}
+
+func (mt *Tree) Clone() *Tree {
+	newOrder := make([]string, len(mt.Order))
+	copy(newOrder, mt.Order)
+
+	newContent := make(map[string]Marshalable)
+	for k, v := range mt.Content {
+		newContent[k] = v
+	}
+
+	newTree := &Tree{
+		Content: newContent,
+		Name:    mt.Name,
+		Order:   newOrder,
+		FullKey: mt.FullKey,
+		decoder: mt.decoder,
+	}
+
+	return newTree
 }
 
 func (mt *Tree) clearValues() {

@@ -147,18 +147,18 @@ func (mb *Branch) UnmarshalJSON(raw []byte) error {
 
 		delim, ok := token.(json.Delim)
 		if !ok {
-			leaf := NewLeaf(name, mb.fullKey)
+			leaf := NewLeaf(name, mb.FullKey)
 			leaf.decoder = mb.decoder
 			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
 			case '{':
-				childTree := NewSubTree(name, mb.fullKey)
+				childTree := NewSubTree(name, mb.FullKey)
 				childTree.decoder = mb.decoder
 				child = childTree
 			case '[':
-				branch := NewBranch(name, mb.fullKey)
+				branch := NewBranch(name, mb.FullKey)
 				branch.decoder = mb.decoder
 				child = branch
 			default:
@@ -223,18 +223,18 @@ func (mt *Tree) UnmarshalJSON(raw []byte) error {
 
 		delim, ok := token.(json.Delim)
 		if !ok {
-			leaf := NewLeaf(name, mt.fullKey)
+			leaf := NewLeaf(name, mt.FullKey)
 			leaf.decoder = mt.decoder
 			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
 			case '{':
-				childTree := NewSubTree(name, mt.fullKey)
+				childTree := NewSubTree(name, mt.FullKey)
 				childTree.decoder = mt.decoder
 				child = childTree
 			case '[':
-				branch := NewBranch(name, mt.fullKey)
+				branch := NewBranch(name, mt.FullKey)
 				branch.decoder = mt.decoder
 				child = branch
 			default:
@@ -247,7 +247,7 @@ func (mt *Tree) UnmarshalJSON(raw []byte) error {
 			}
 		}
 
-		mt.AddDirectly(name, child)
+		mt.AddOrReplaceDirectly(name, child)
 	}
 
 	token, err := mt.decoder.Token() // '}'
