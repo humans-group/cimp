@@ -54,7 +54,7 @@ func TestTree_MarshalYAML(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "")
+				m = NewBranch("", "", 0)
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -110,7 +110,7 @@ func TestTree_MarshalJSON(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "")
+				m = NewBranch("", "", 0)
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -168,7 +168,7 @@ func TestTree_UnmarshalYAML(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "")
+				m = NewBranch("", "", 0)
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -227,7 +227,7 @@ func TestTree_UnmarshalJSON(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "")
+				m = NewBranch("", "", 0)
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:

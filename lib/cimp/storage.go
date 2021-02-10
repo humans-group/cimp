@@ -34,7 +34,7 @@ func (cs *ConsulStorage) Save(kv *KV) error {
 	var ops api.TxnOps
 
 	var i int
-	for key, path := range kv.index {
+	for key, path := range kv.idx {
 		i++
 		leaf, err := kv.tree.Get(path)
 		if err != nil {
@@ -45,12 +45,12 @@ func (cs *ConsulStorage) Save(kv *KV) error {
 			KV: &api.KVTxnOp{
 				Verb:  api.KVSet,
 				Key:   kv.globalPrefix + key,
-				Value: []byte(fmt.Sprintf("%v", leaf.Value)),
+				Value: []byte(fmt.Sprint(leaf.Value)),
 			},
 		}
 		ops = append(ops, op)
 
-		if len(ops) == consulTransactionLimit || i == len(kv.index) {
+		if len(ops) == consulTransactionLimit || i == len(kv.idx) {
 			if ok, _, _, err := cs.client.Txn().Txn(ops, nil); !ok {
 				return fmt.Errorf("execute consul SET-transaction: %w", err)
 			}
@@ -58,15 +58,17 @@ func (cs *ConsulStorage) Save(kv *KV) error {
 		}
 	}
 
-	if ok, _, _, err := cs.client.Txn().Txn(ops, nil); !ok {
-		return fmt.Errorf("execute consul SET-transaction: %w", err)
+	if len(ops) > 0 {
+		if ok, _, _, err := cs.client.Txn().Txn(ops, nil); !ok {
+			return fmt.Errorf("execute consul SET-transaction: %w", err)
+		}
 	}
 
 	return nil
 }
 
 func (cs *ConsulStorage) Delete(kv *KV) error {
-	for k := range kv.index {
+	for k := range kv.idx {
 		_, err := cs.client.KV().Delete(k, nil)
 		if err != nil {
 			return fmt.Errorf("delete %q from consul: %w", k, err)

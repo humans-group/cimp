@@ -19,19 +19,19 @@ func (mt *Tree) UnmarshalYAML(node *yaml.Node) error {
 
 		switch curNode.Kind {
 		case yaml.ScalarNode:
-			leaf := NewLeaf(curKey, mt.FullKey)
+			leaf := NewLeaf(curKey, mt.FullKey, mt.NestingLevel)
 			if err := leaf.UnmarshalYAML(curNode); err != nil {
 				return fmt.Errorf("unmarshal leaf %q: %w", curKey, err)
 			}
 			mt.AddOrReplaceDirectly(curKey, leaf)
 		case yaml.MappingNode:
-			childTree := NewSubTree(curKey, mt.FullKey)
+			childTree := NewSubTree(curKey, mt.FullKey, mt.NestingLevel)
 			if err := childTree.UnmarshalYAML(curNode); err != nil {
 				return fmt.Errorf("unmarshal sub-tree %q: %w", curKey, err)
 			}
 			mt.AddOrReplaceDirectly(curKey, childTree)
 		case yaml.SequenceNode:
-			branch := NewBranch(curKey, mt.FullKey)
+			branch := NewBranch(curKey, mt.FullKey, mt.NestingLevel)
 			if err := branch.UnmarshalYAML(curNode); err != nil {
 				return fmt.Errorf("unmarshal branch %q: %w", curKey, err)
 			}
@@ -55,24 +55,21 @@ func (mb *Branch) UnmarshalYAML(node *yaml.Node) error {
 
 		switch curNode.Kind {
 		case yaml.ScalarNode:
-			leaf := &Leaf{
-				FullKey: MakeFullKey(mb.FullKey, curKey),
-				Name:    curKey,
-				Value:   curNode.Value,
-			}
-			mb.Content = append(mb.Content, leaf)
+			leaf := NewLeaf(curKey, mb.FullKey, mb.NestingLevel)
+			leaf.Value = curNode.Value
+			mb.Add(leaf)
 		case yaml.MappingNode:
-			tree := NewSubTree(curKey, mb.FullKey)
+			tree := NewSubTree(curKey, mb.FullKey, mb.NestingLevel)
 			if err := tree.UnmarshalYAML(curNode); err != nil {
 				return fmt.Errorf("unmarshal %q: %w", curKey, err)
 			}
-			mb.Content = append(mb.Content, tree)
+			mb.Add(tree)
 		case yaml.SequenceNode:
-			childBranch := NewBranch(curKey, mb.FullKey)
+			childBranch := NewBranch(curKey, mb.FullKey, mb.NestingLevel)
 			if err := childBranch.UnmarshalYAML(curNode); err != nil {
 				return fmt.Errorf("unamrshal child branch #%s: %w", curKey, err)
 			}
-			mb.Content = append(mb.Content, childBranch)
+			mb.Add(childBranch)
 		default:
 			return fmt.Errorf("unprocessable content type of %q: %v", curKey, curNode.Kind)
 		}
@@ -147,8 +144,13 @@ func (mb *Branch) MarshalYAML() (interface{}, error) {
 }
 
 func (ml *Leaf) MarshalYAML() (interface{}, error) {
+	if ml.yamlMarshalStyle == 0 {
+		ml.yamlMarshalStyle = yaml.TaggedStyle
+	}
+
 	return &yaml.Node{
 		Kind:  yaml.ScalarNode,
+		Style: ml.yamlMarshalStyle,
 		Value: fmt.Sprint(ml.Value),
 	}, nil
 }

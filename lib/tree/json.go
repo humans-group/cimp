@@ -147,18 +147,18 @@ func (mb *Branch) UnmarshalJSON(raw []byte) error {
 
 		delim, ok := token.(json.Delim)
 		if !ok {
-			leaf := NewLeaf(name, mb.FullKey)
+			leaf := NewLeaf(name, mb.FullKey, mb.NestingLevel)
 			leaf.decoder = mb.decoder
 			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
 			case '{':
-				childTree := NewSubTree(name, mb.FullKey)
+				childTree := NewSubTree(name, mb.FullKey, mb.NestingLevel)
 				childTree.decoder = mb.decoder
 				child = childTree
 			case '[':
-				branch := NewBranch(name, mb.FullKey)
+				branch := NewBranch(name, mb.FullKey, mb.NestingLevel)
 				branch.decoder = mb.decoder
 				child = branch
 			default:
@@ -170,7 +170,7 @@ func (mb *Branch) UnmarshalJSON(raw []byte) error {
 		if err := child.UnmarshalJSON(nil); err != nil {
 			return fmt.Errorf("unmarshal %q: %w", name, err)
 		}
-		mb.Content = append(mb.Content, child)
+		mb.Add(child)
 	}
 
 	token, err := mb.decoder.Token() // '}'
@@ -223,18 +223,18 @@ func (mt *Tree) UnmarshalJSON(raw []byte) error {
 
 		delim, ok := token.(json.Delim)
 		if !ok {
-			leaf := NewLeaf(name, mt.FullKey)
+			leaf := NewLeaf(name, mt.FullKey, mt.NestingLevel)
 			leaf.decoder = mt.decoder
 			leaf.Value = token
 			child = leaf
 		} else {
 			switch delim {
 			case '{':
-				childTree := NewSubTree(name, mt.FullKey)
+				childTree := NewSubTree(name, mt.FullKey, mt.NestingLevel)
 				childTree.decoder = mt.decoder
 				child = childTree
 			case '[':
-				branch := NewBranch(name, mt.FullKey)
+				branch := NewBranch(name, mt.FullKey, mt.NestingLevel)
 				branch.decoder = mt.decoder
 				child = branch
 			default:
