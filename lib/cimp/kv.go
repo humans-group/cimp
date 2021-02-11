@@ -1,143 +1,214 @@
 package cimp
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"regexp"
+	"strconv"
 	"strings"
 
-	"github.com/hashicorp/consul/api"
-	"olympos.io/encoding/edn"
+	"gopkg.in/yaml.v3"
+
+	"github.com/humans-group/cimp/lib/tree"
 )
 
-type KV map[string]interface{}
-
-func NewKV() KV {
-	kv := KV(make(map[string]interface{}))
-	return kv
+type KV struct {
+	tree         *tree.Tree
+	idx          index
+	globalPrefix string
 }
 
-func (kv KV) FillFromFile(path string, format FileFormat, arrayValueFormat FileFormat) error {
-	fileData, err := ioutil.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read file data: %v", err)
+type index map[string]tree.Path
+
+type treeConverter struct {
+	Format FileFormat
+	Indent int
+}
+
+func NewKV(t *tree.Tree) *KV {
+	idx := index(make(map[string]tree.Path))
+	idx.addKeys(t, nil)
+
+	return &KV{
+		tree: t,
+		idx:  idx,
 	}
-
-	rawData, err := UnmarshalWithFormat(format, fileData)
-	if err != nil {
-		return fmt.Errorf("unmarshal %q-file: %w", format, err)
-	}
-
-	return kv.fillRecursive("", rawData, arrayValueFormat)
 }
 
-func (kv KV) Fill(prefix string, rawData map[interface{}]interface{}, arrayValueFormat FileFormat) error {
-	return kv.fillRecursive(prefix, rawData, arrayValueFormat)
-}
-
-func (kv KV) Check(key string) bool {
-	_, ok := kv[key]
-	return ok
-}
-
-func (kv KV) GetString(key string) (string, error) {
-	value, ok := kv[key]
+func (kv *KV) SetIfExist(key string, value interface{}) error {
+	path, ok := kv.idx[key]
 	if !ok {
-		return "", fmt.Errorf("value %q: %w", key, ErrorNotFoundInKV)
+		return nil
 	}
 
-	switch typed := value.(type) {
-	case string:
-		return typed, nil
+	leaf, err := kv.tree.Get(path)
+	if err != nil {
+		return fmt.Errorf("get by path: %w", err)
 	}
 
-	return "", fmt.Errorf("value %q: %w", key, ErrorTypeIncorrect)
-}
-
-func (kv KV) AddPair(pair api.KVPair) {
-	kv[pair.Key] = pair.Value
-}
-
-func (kv KV) AddPrefix(prefix string) {
-	newKV := NewKV()
-	for key, value := range kv {
-		newKV[prefix+key] = value
-		delete(kv, key)
-	}
-	for key, value := range newKV {
-		kv[key] = value
-		delete(newKV, key)
-	}
-}
-
-func (kv KV) fillRecursive(prefix string, rawData interface{}, arrayValueFormat FileFormat) error {
-	switch data := rawData.(type) {
-	case map[interface{}]interface{}:
-		for key := range data {
-			stringKey, err := keyToString(prefix, key)
-			if err != nil {
-				return fmt.Errorf("failed to convert key %#v to string: %w", key, err)
-			}
-			if err := kv.fillRecursive(stringKey, data[key], arrayValueFormat); err != nil {
-				return err
-			}
-		}
-	case []interface{}:
-		marshaledArray, err := MarshalWithFormat(arrayValueFormat, data)
-		if err != nil {
-			return fmt.Errorf("marshal array %#v to %q: %w", data, arrayValueFormat, err)
-		}
-		kv[prefix] = string(marshaledArray)
-	default:
-		kv[prefix] = rawData
-	}
+	leaf.Value = value
 
 	return nil
 }
 
-func keyToString(prefix string, key interface{}) (string, error) {
-	var result string
+func (kv *KV) GetString(key string) (string, error) {
+	path, ok := kv.idx[key]
+	if !ok {
+		return "", fmt.Errorf("value by key %q: %w", key, ErrorNotFoundInKV)
+	}
 
-	switch curKey := key.(type) {
+	leaf, err := kv.tree.Get(path)
+	if err != nil {
+		return "", fmt.Errorf("get by path: %w", err)
+	}
+
+	switch value := leaf.Value.(type) {
 	case string:
-		result = curKey
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		result = fmt.Sprintf("%d", curKey)
-	case float32, float64:
-		result = fmt.Sprintf("%f", curKey)
-	case bool:
-		result = fmt.Sprintf("%t", curKey)
-	case edn.Keyword:
-		strKey := curKey.String()
-		if len(strKey) < 1 {
-			return "", fmt.Errorf("edn-key %#v is empty or not stringable", key)
-		}
-		// remove `:` from beginning of the key
-		result = fmt.Sprintf("%s", strKey[1:])
+		return value, nil
 	default:
-		return "", fmt.Errorf("invalid config key type: %#v", curKey)
+		return "", fmt.Errorf("value %q: %w", key, ErrorTypeIncorrect)
 	}
-
-	result = ToSnakeCase(result)
-
-	if len(prefix) > 0 {
-		result = prefix + "/" + result
-	}
-
-	return result, nil
 }
 
-var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
-var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
-var matchAllSpecSymbols = regexp.MustCompile("[^A-z0-9]")
-var matchAllMultipleUnderscore = regexp.MustCompile("[_]{2,}")
+func (kv *KV) AddPrefix(prefix string) {
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
+	kv.globalPrefix = prefix
+}
 
-func ToSnakeCase(str string) string {
-	str = matchAllSpecSymbols.ReplaceAllString(str, "_")
-	str = matchFirstCap.ReplaceAllString(str, "${1}_${2}")
-	str = matchAllCap.ReplaceAllString(str, "${1}_${2}")
-	str = matchAllMultipleUnderscore.ReplaceAllString(str, "_")
-	str = strings.Trim(str, "_")
+func (kv *KV) SetTree(t *tree.Tree) {
+	kv.tree = t
+	kv.idx.clear()
+	kv.idx.addKeys(t, nil)
+}
 
-	return strings.ToLower(str)
+func (kv *KV) Walk(walkFunc tree.WalkFunc) {
+	kv.tree.Walk(walkFunc)
+}
+
+func (kv *KV) DeepClone() *KV {
+	newTree := kv.tree.DeepClone()
+	newKV := NewKV(newTree)
+	newKV.globalPrefix = kv.globalPrefix
+
+	return newKV
+}
+
+func (kv *KV) ConvertBranchesToString(format FileFormat, indent int) error {
+	tc := treeConverter{
+		Format: format,
+		Indent: indent,
+	}
+
+	convertedTree, err := tc.convertBranchesToString(kv.tree)
+	if err != nil {
+		return fmt.Errorf("convert branches to string: %w", err)
+	}
+	kv.SetTree(convertedTree)
+
+	return nil
+}
+
+func (kv *KV) ConvertTreeNamesToCamelCase() {
+	kv.setNamesToSnakeCase(kv.tree)
+	kv.idx.clear()
+	kv.idx.addKeys(kv.tree, nil)
+}
+
+func (kv *KV) setNamesToSnakeCase(m tree.Marshalable) {
+	switch item := m.(type) {
+	case *tree.Leaf:
+		item.Name = tree.ToSnakeCase(item.Name)
+	case *tree.Branch:
+		for i := range item.Content {
+			kv.setNamesToSnakeCase(item.Content[i])
+		}
+		item.Name = tree.ToSnakeCase(item.Name)
+	case *tree.Tree:
+		item.Name = tree.ToSnakeCase(item.Name)
+		for k, v := range item.Content {
+			kv.setNamesToSnakeCase(v)
+			delete(item.Content, k)
+			k = tree.ToSnakeCase(k)
+			item.Content[k] = v
+		}
+		for i, name := range item.Order {
+			item.Order[i] = tree.ToSnakeCase(name)
+		}
+	}
+}
+
+// ConvertBranchesToString walks recursively through the map and marshals all slices to strings
+func (c treeConverter) convertBranchesToString(mt *tree.Tree) (*tree.Tree, error) {
+	newTree := mt.ShallowClone()
+
+	for k, v := range mt.Content {
+		switch item := v.(type) {
+		case *tree.Leaf:
+			continue
+		case *tree.Branch:
+			buf := bytes.Buffer{}
+			switch c.Format {
+			case JSONFormat:
+				e := json.NewEncoder(&buf)
+				e.SetIndent("", strings.Repeat(" ", c.Indent))
+				if err := e.Encode(item); err != nil {
+					return nil, fmt.Errorf("JSON-encode %q: %w", k, err)
+				}
+			case YAMLFormat:
+				e := yaml.NewEncoder(&buf)
+				e.SetIndent(c.Indent)
+				if err := e.Encode(item); err != nil {
+					return nil, fmt.Errorf("YAML-encode %q: %w", k, err)
+				}
+			}
+
+			leaf := tree.NewLeaf(k, mt.FullKey, mt.NestingLevel)
+			leafValueBuf := bytes.NewBufferString("\n")
+			leafValueBuf.Write(buf.Bytes())
+			endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.NestingLevel)*c.Indent))
+			leafValue := bytes.ReplaceAll(
+				leafValueBuf.Bytes(),
+				[]byte("\n"),
+				endLineAndIndent,
+			)
+			leafValue = bytes.TrimSuffix(leafValue, endLineAndIndent)
+			leaf.Value = string(leafValue)
+
+			newTree.AddOrReplaceDirectly(k, leaf)
+		case *tree.Tree:
+			newItem, err := c.convertBranchesToString(item)
+			if err != nil {
+				return nil, fmt.Errorf("convert branches of tree %q: %w", k, err)
+			}
+			newTree.AddOrReplaceDirectly(k, newItem)
+		}
+	}
+
+	return newTree, nil
+}
+
+func (idx index) clear() {
+	for k := range idx {
+		delete(idx, k)
+	}
+}
+
+func (idx index) addKeys(m tree.Marshalable, prevPath tree.Path) {
+	path := make(tree.Path, len(prevPath))
+	copy(path, prevPath)
+
+	switch cur := m.(type) {
+	case *tree.Leaf:
+		idx[cur.FullKey] = path
+	case *tree.Tree:
+		for _, k := range cur.Order {
+			idx.addKeys(cur.Content[k], append(path, k))
+		}
+	case *tree.Branch:
+		for k, v := range cur.Content {
+			idx.addKeys(v, append(path, strconv.Itoa(k)))
+		}
+	}
 }
