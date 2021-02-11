@@ -53,7 +53,7 @@ func (m *kvMarshaler) Marshal() ([]byte, error) {
 		err = yamlEncoder.Encode(m.kv.tree)
 	case JSONFormat:
 		jsonEncoder := json.NewEncoder(&rawBuf)
-		jsonEncoder.SetIndent("", strings.Repeat("", m.indentSpaces))
+		jsonEncoder.SetIndent("", strings.Repeat(" ", m.indentSpaces))
 		err = jsonEncoder.Encode(m.kv.tree)
 	default:
 		return nil, fmt.Errorf("unsupported marshal format: %v", m.format)
