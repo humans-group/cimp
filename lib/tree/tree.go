@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +14,11 @@ type Marshalable interface {
 	UnmarshalYAML(value *yaml.Node) error
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON(raw []byte) error
+	GetByFullKey(string) (Marshalable, error)
+	GetFullKey() string
+	GetName() string
+	GetNestingLevel() int
+	Delete(string) error
 }
 
 type Tree struct {
@@ -20,7 +26,7 @@ type Tree struct {
 	Name         string
 	Order        []string
 	FullKey      string
-	NestingLevel uint
+	nestingLevel int
 	decoder      *json.Decoder
 }
 
@@ -28,7 +34,7 @@ type Branch struct {
 	Content      []Marshalable
 	Name         string
 	FullKey      string
-	NestingLevel uint
+	nestingLevel int
 	decoder      *json.Decoder
 }
 
@@ -37,7 +43,7 @@ type Leaf struct {
 	Name             string
 	FullKey          string
 	decoder          *json.Decoder
-	NestingLevel     uint
+	nestingLevel     int
 	yamlMarshalStyle yaml.Style
 }
 
@@ -49,29 +55,29 @@ func New() *Tree {
 	}
 }
 
-func NewSubTree(name, parentFullKey string, parentNestingLevel uint) *Tree {
+func NewSubTree(name, parentFullKey string) *Tree {
 	return &Tree{
 		Content:      make(map[string]Marshalable),
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		NestingLevel: parentNestingLevel + 1,
+		nestingLevel: strings.Count(parentFullKey, sep) + 2,
 	}
 }
 
-func NewBranch(name, parentFullKey string, parentNestingLevel uint) *Branch {
+func NewBranch(name, parentFullKey string) *Branch {
 	return &Branch{
 		Content:      []Marshalable{},
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		NestingLevel: parentNestingLevel + 1,
+		nestingLevel: strings.Count(parentFullKey, sep) + 2,
 	}
 }
 
-func NewLeaf(name, parentFullKey string, parentNestingLevel uint) *Leaf {
+func NewLeaf(name, parentFullKey string) *Leaf {
 	return &Leaf{
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		NestingLevel: parentNestingLevel + 1,
+		nestingLevel: strings.Count(parentFullKey, sep) + 2,
 	}
 }
 
@@ -126,17 +132,172 @@ func (mb *Branch) Get(path Path) (*Leaf, error) {
 	}
 }
 
+func (mt *Tree) GetByFullKey(fullKey string) (Marshalable, error) {
+	if mt.FullKey == fullKey {
+		return mt, nil
+	}
+
+	relativeKey := strings.TrimPrefix(fullKey, mt.FullKey+sep)
+	if len(relativeKey) > len(fullKey) {
+		return nil, ErrorNotFound
+	}
+
+	sepIdx := strings.IndexAny(relativeKey, sep)
+	// If separator is not found - it should be final item
+	isFinal := sepIdx == -1
+	curRelativeKey := relativeKey
+	if !isFinal {
+		curRelativeKey = relativeKey[:sepIdx]
+	}
+	searchKey := curRelativeKey
+	if len(mt.FullKey) != 0 {
+		searchKey = mt.FullKey + sep + searchKey
+	}
+
+	for _, v := range mt.Content {
+		if v.GetFullKey() == searchKey {
+			return v.GetByFullKey(fullKey)
+		}
+	}
+
+	return nil, ErrorNotFound
+}
+
+func (mb *Branch) GetByFullKey(fullKey string) (Marshalable, error) {
+	if mb.FullKey == fullKey {
+		return mb, nil
+	}
+
+	relativeKey := strings.TrimPrefix(fullKey, mb.FullKey+sep)
+	if len(relativeKey) > len(fullKey) {
+		return nil, ErrorNotFound
+	}
+
+	sepIdx := strings.IndexAny(relativeKey, sep)
+	// If separator is not found - it should be final item
+	isFinal := sepIdx == -1
+	curRelativeKey := relativeKey
+	if !isFinal {
+		curRelativeKey = relativeKey[:sepIdx]
+	}
+	searchIdx, err := strconv.Atoi(curRelativeKey)
+	if err != nil {
+		return nil, fmt.Errorf("wrong fullKey format, %q is branch: %w", mb.FullKey, err)
+	}
+
+	if len(mb.Content)-1 >= searchIdx {
+		return mb.Content[searchIdx].GetByFullKey(fullKey)
+	}
+
+	return nil, ErrorNotFound
+}
+
+func (ml *Leaf) GetByFullKey(fullKey string) (Marshalable, error) {
+	if ml.FullKey == fullKey {
+		return ml, nil
+	}
+
+	return nil, ErrorNotFound
+}
+
+func (mt *Tree) Delete(fullKey string) error {
+	if mt.FullKey == fullKey {
+		return fmt.Errorf("you can't delete a tree from itself")
+	}
+
+	relativeKey := strings.TrimPrefix(fullKey, mt.FullKey+sep)
+	if len(relativeKey) > len(fullKey) {
+		return ErrorNotFound
+	}
+
+	sepIdx := strings.IndexAny(relativeKey, sep)
+	isFinal := sepIdx == -1
+	curRelativeKey := relativeKey
+	if !isFinal {
+		curRelativeKey = relativeKey[:sepIdx]
+	}
+	searchKey := curRelativeKey
+	if len(mt.FullKey) != 0 {
+		searchKey = mt.FullKey + sep + searchKey
+	}
+
+	var deletedName string
+	for _, v := range mt.Content {
+		if v.GetFullKey() != searchKey {
+			continue
+		}
+		if !isFinal {
+			return v.Delete(fullKey)
+		}
+		deletedName = v.GetName()
+		delete(mt.Content, deletedName)
+		break
+	}
+
+	if len(deletedName) == 0 {
+		return ErrorNotFound
+	}
+
+	for i, orderedName := range mt.Order {
+		if orderedName == deletedName {
+			copy(mt.Order[i:], mt.Order[i+1:])    // Shift a[i+1:] left one index
+			mt.Order[len(mt.Order)-1] = ""        // Erase last element (write zero value)
+			mt.Order = mt.Order[:len(mt.Order)-1] // Truncate slice
+			return nil
+		}
+	}
+
+	return fmt.Errorf("item %q was deleted, but its name is not found in order slice", deletedName)
+}
+
+func (mb *Branch) Delete(fullKey string) error {
+	if mb.FullKey == fullKey {
+		return fmt.Errorf("you can't delete a branch from itself")
+	}
+
+	relativeKey := strings.TrimPrefix(fullKey, mb.FullKey+sep)
+
+	sepIdx := strings.IndexAny(relativeKey, sep)
+	isFinal := sepIdx == -1
+	curRelativeKey := relativeKey
+	if !isFinal {
+		curRelativeKey = relativeKey[:sepIdx]
+	}
+	searchIdx, err := strconv.Atoi(curRelativeKey)
+	if err != nil {
+		return fmt.Errorf("wrong fullKey format, %q is branch: %w", mb.FullKey, err)
+	}
+
+	if len(mb.Content)-1 < searchIdx {
+		return ErrorNotFound
+	}
+
+	if !isFinal {
+		return mb.Content[searchIdx].Delete(fullKey)
+	}
+
+	copy(mb.Content[searchIdx:], mb.Content[searchIdx+1:]) // Shift a[i+1:] left one index
+	mb.Content[len(mb.Content)-1] = nil                    // Erase last element (write zero value)
+	mb.Content = mb.Content[:len(mb.Content)-1]            // Truncate slice
+
+	return nil
+}
+
+func (ml *Leaf) Delete(_ string) error {
+	return ErrorUnsupported
+}
+
 func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
 	if _, ok := mt.Content[name]; !ok {
 		mt.Order = append(mt.Order, name)
 	}
 	switch item := value.(type) {
 	case *Tree:
-		item.NestingLevel = mt.NestingLevel + 1
+		item.nestingLevel = mt.nestingLevel + 1
 	case *Branch:
-		item.NestingLevel = mt.NestingLevel + 1
+		item.nestingLevel = mt.nestingLevel + 1
 	case *Leaf:
-		item.NestingLevel = mt.NestingLevel + 1
+		item.nestingLevel = mt.nestingLevel + 1
 	}
 
 	mt.Content[name] = value
@@ -161,7 +322,7 @@ func (mt *Tree) ShallowClone() *Tree {
 		Order:        newOrder,
 		FullKey:      mt.FullKey,
 		decoder:      mt.decoder,
-		NestingLevel: mt.NestingLevel,
+		nestingLevel: mt.nestingLevel,
 	}
 
 	return newTree
@@ -188,7 +349,7 @@ func (mt *Tree) DeepClone() *Tree {
 		Name:         mt.Name,
 		Order:        newOrder,
 		FullKey:      mt.FullKey,
-		NestingLevel: mt.NestingLevel,
+		nestingLevel: mt.nestingLevel,
 		decoder:      mt.decoder,
 	}
 
@@ -212,7 +373,7 @@ func (mb *Branch) DeepClone() *Branch {
 		Content:      newContent,
 		Name:         mb.Name,
 		FullKey:      mb.FullKey,
-		NestingLevel: mb.NestingLevel,
+		nestingLevel: mb.nestingLevel,
 		decoder:      mb.decoder,
 	}
 
@@ -238,7 +399,7 @@ func (ml *Leaf) DeepClone() *Leaf {
 		Value:            newValue,
 		Name:             ml.Name,
 		FullKey:          ml.FullKey,
-		NestingLevel:     ml.NestingLevel,
+		nestingLevel:     ml.nestingLevel,
 		decoder:          ml.decoder,
 		yamlMarshalStyle: ml.yamlMarshalStyle,
 	}
@@ -278,6 +439,42 @@ func (mb *Branch) Walk(wf WalkFunc) {
 			curItem.Walk(wf)
 		}
 	}
+}
+
+func (mb *Branch) GetName() string {
+	return mb.Name
+}
+
+func (mb *Branch) GetFullKey() string {
+	return mb.FullKey
+}
+
+func (mb *Branch) GetNestingLevel() int {
+	return mb.nestingLevel
+}
+
+func (mt *Tree) GetName() string {
+	return mt.Name
+}
+
+func (mt *Tree) GetFullKey() string {
+	return mt.FullKey
+}
+
+func (mt *Tree) GetNestingLevel() int {
+	return mt.nestingLevel
+}
+
+func (ml *Leaf) GetName() string {
+	return ml.Name
+}
+
+func (ml *Leaf) GetFullKey() string {
+	return ml.FullKey
+}
+
+func (ml *Leaf) GetNestingLevel() int {
+	return ml.nestingLevel
 }
 
 func (mt *Tree) clearValues() {

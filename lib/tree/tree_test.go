@@ -54,7 +54,7 @@ func TestTree_MarshalYAML(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "", 0)
+				m = NewBranch("", "")
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -110,7 +110,7 @@ func TestTree_MarshalJSON(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "", 0)
+				m = NewBranch("", "")
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -168,7 +168,7 @@ func TestTree_UnmarshalYAML(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "", 0)
+				m = NewBranch("", "")
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -227,7 +227,7 @@ func TestTree_UnmarshalJSON(t *testing.T) {
 			var m Marshalable
 			switch tc.name {
 			case testBranchSimple, testBranchHard:
-				m = NewBranch("", "", 0)
+				m = NewBranch("", "")
 			case testTreeSimple, testTreeHard:
 				m = New()
 			default:
@@ -256,5 +256,134 @@ func TestTree_UnmarshalJSON(t *testing.T) {
 				t.Errorf("result %q != expectation %q", resBuf.String(), string(expRaw))
 			}
 		})
+	}
+}
+
+func TestTree_GetByFullKey(t *testing.T) {
+	tree := &Tree{
+		Content: map[string]Marshalable{
+			"Leaf 1": &Leaf{
+				Value:        "hi",
+				Name:         "Leaf 1",
+				FullKey:      "tree_1/leaf_1",
+				nestingLevel: 1,
+			},
+			"Leaf 2": &Leaf{
+				Value:        "hi",
+				Name:         "Leaf 2",
+				FullKey:      "tree_1/leaf_2",
+				nestingLevel: 1,
+			},
+			"Branch 1": &Branch{
+				Content: []Marshalable{
+					&Leaf{
+						Value:        "hi",
+						Name:         "Leaf 1",
+						FullKey:      "tree_1/branch_1/0",
+						nestingLevel: 2,
+					},
+					&Leaf{
+						Value:        "hi",
+						Name:         "Leaf 2",
+						FullKey:      "tree_1/branch_1/1",
+						nestingLevel: 2,
+					},
+				},
+				Name:         "Branch 1",
+				FullKey:      "tree_1/branch_1",
+				nestingLevel: 1,
+			},
+		},
+		Name:         "Tree 1",
+		Order:        []string{"leaf1"},
+		FullKey:      "tree_1",
+		nestingLevel: 0,
+	}
+
+	tests := []struct {
+		name          testName
+		searchFullKey string
+		foundFullKey  string
+		expErr        error
+	}{
+		{
+			name:          "simple",
+			searchFullKey: "tree_1/leaf_1",
+		},
+		{
+			name:          "not found",
+			searchFullKey: "tree_1/leaf_3",
+			expErr:        ErrorNotFound,
+		},
+		{
+			name:          "branch",
+			searchFullKey: "tree_1/branch_1",
+		},
+		{
+			name:          "from branch",
+			searchFullKey: "tree_1/branch_1/1",
+		},
+		{
+			name:          "abrakadabra",
+			searchFullKey: "sdfdsfdsf",
+			expErr:        ErrorNotFound,
+		},
+		{
+			name:          "empty",
+			searchFullKey: "",
+			expErr:        ErrorNotFound,
+		},
+		{
+			name:          "not found in branch",
+			searchFullKey: "tree_1/branch_1/3",
+			expErr:        ErrorNotFound,
+		},
+	}
+
+	for _, tc := range tests {
+		res, err := tree.GetByFullKey(tc.searchFullKey)
+		if tc.expErr == nil && err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if tc.expErr == nil && (res == nil || res.GetFullKey() != tc.searchFullKey) {
+			t.Errorf("result not found")
+		}
+	}
+
+	relativeTests := []struct {
+		name          testName
+		searchFullKey string
+		foundFullKey  string
+		expErr        error
+	}{
+		{
+			name:          "from branch",
+			searchFullKey: "tree_1/branch_1/1",
+		},
+		{
+			name:          "abrakadabra",
+			searchFullKey: "sdfdsfdsf",
+			expErr:        ErrorNotFound,
+		},
+		{
+			name:          "empty",
+			searchFullKey: "",
+			expErr:        ErrorNotFound,
+		},
+		{
+			name:          "not found in branch",
+			searchFullKey: "tree_1/branch_1/3",
+			expErr:        ErrorNotFound,
+		},
+	}
+
+	for _, tc := range relativeTests {
+		res, err := tree.Content["Branch 1"].GetByFullKey(tc.searchFullKey)
+		if tc.expErr == nil && err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if tc.expErr == nil && (res == nil || res.GetFullKey() != tc.searchFullKey) {
+			t.Errorf("result not found")
+		}
 	}
 }
