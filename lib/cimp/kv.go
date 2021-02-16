@@ -3,6 +3,7 @@ package cimp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,6 +25,8 @@ type treeConverter struct {
 	Format FileFormat
 	Indent int
 }
+
+const consulSep = "/"
 
 func NewKV(t *tree.Tree) *KV {
 	idx := index(make(map[string]tree.Path))
@@ -70,9 +73,70 @@ func (kv *KV) GetString(key string) (string, error) {
 	}
 }
 
+func (kv *KV) Exists(fullKey string) bool {
+	if _, ok := kv.idx[fullKey]; ok {
+		return true
+	}
+
+	_, err := kv.tree.GetByFullKey(fullKey)
+
+	return err == nil
+}
+
+func (kv *KV) AddIfNotSet(m tree.Marshalable) error {
+	if _, ok := kv.idx[m.GetFullKey()]; ok {
+		return nil
+	}
+
+	lastSepIdx := strings.LastIndexAny(m.GetFullKey(), consulSep)
+	if lastSepIdx < 0 {
+		return ErrorParentNotFoundInKV
+	}
+	parentFullKey := m.GetFullKey()[:lastSepIdx]
+
+	parent, err := kv.tree.GetByFullKey(parentFullKey)
+	if err != nil {
+		if errors.Is(err, tree.ErrorNotFound) {
+			return ErrorParentNotFoundInKV
+		}
+		return fmt.Errorf("get parent: %w", err)
+	}
+
+	if item, err := parent.GetByFullKey(m.GetFullKey()); err == nil || item != nil {
+		return nil
+	} else if !errors.Is(err, tree.ErrorNotFound) {
+		return fmt.Errorf("check value %q existence: %w", m.GetFullKey(), err)
+	}
+
+	switch parItem := parent.(type) {
+	case *tree.Tree:
+		parItem.AddOrReplaceDirectly(m.GetName(), m)
+	case *tree.Branch:
+		parItem.Add(m)
+	default:
+		return ErrorTypeIncorrect
+	}
+
+	return nil
+}
+
+func (kv *KV) DeleteIfExists(fullKey string) error {
+	if err := kv.tree.Delete(fullKey); err != nil {
+		if errors.Is(err, tree.ErrorNotFound) {
+			return nil
+		}
+
+		return fmt.Errorf("delete by key %q: %w", fullKey, err)
+	}
+
+	delete(kv.idx, fullKey)
+
+	return nil
+}
+
 func (kv *KV) AddPrefix(prefix string) {
-	if !strings.HasSuffix(prefix, "/") {
-		prefix = prefix + "/"
+	if !strings.HasSuffix(prefix, consulSep) {
+		prefix = prefix + consulSep
 	}
 	kv.globalPrefix = prefix
 }
@@ -164,10 +228,10 @@ func (c treeConverter) convertBranchesToString(mt *tree.Tree) (*tree.Tree, error
 				}
 			}
 
-			leaf := tree.NewLeaf(k, mt.FullKey, mt.NestingLevel)
+			leaf := tree.NewLeaf(k, mt.FullKey)
 			leafValueBuf := bytes.NewBufferString("\n")
 			leafValueBuf.Write(buf.Bytes())
-			endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.NestingLevel)*c.Indent))
+			endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.GetNestingLevel())*c.Indent))
 			leafValue := bytes.ReplaceAll(
 				leafValueBuf.Bytes(),
 				[]byte("\n"),
@@ -195,9 +259,9 @@ func (idx index) clear() {
 	}
 }
 
-func (idx index) addKeys(m tree.Marshalable, prevPath tree.Path) {
-	path := make(tree.Path, len(prevPath))
-	copy(path, prevPath)
+func (idx index) addKeys(m tree.Marshalable, curPath tree.Path) {
+	path := make(tree.Path, len(curPath))
+	copy(path, curPath)
 
 	switch cur := m.(type) {
 	case *tree.Leaf:
