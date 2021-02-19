@@ -110,12 +110,6 @@ func (ml *Leaf) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
 		ml.Value = node.Value
-	case yaml.SequenceNode:
-		leafValue, err := yaml.Marshal(node)
-		if err != nil {
-			return fmt.Errorf("marshal sequence %q: %w", ml.FullKey, err)
-		}
-		ml.Value = string(leafValue)
 	default:
 		return fmt.Errorf("unprocessable content type `%v` for leaf %q", node.Kind, ml.FullKey)
 	}
