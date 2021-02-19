@@ -60,7 +60,7 @@ func NewSubTree(name, parentFullKey string) *Tree {
 		Content:      make(map[string]Marshalable),
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		nestingLevel: strings.Count(parentFullKey, sep) + 2,
+		nestingLevel: initNestingLevel(parentFullKey),
 	}
 }
 
@@ -69,7 +69,7 @@ func NewBranch(name, parentFullKey string) *Branch {
 		Content:      []Marshalable{},
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		nestingLevel: strings.Count(parentFullKey, sep) + 2,
+		nestingLevel: initNestingLevel(parentFullKey),
 	}
 }
 
@@ -77,7 +77,7 @@ func NewLeaf(name, parentFullKey string) *Leaf {
 	return &Leaf{
 		Name:         name,
 		FullKey:      MakeFullKey(parentFullKey, name),
-		nestingLevel: strings.Count(parentFullKey, sep) + 2,
+		nestingLevel: initNestingLevel(parentFullKey),
 	}
 }
 
@@ -475,6 +475,14 @@ func (ml *Leaf) GetFullKey() string {
 
 func (ml *Leaf) GetNestingLevel() int {
 	return ml.nestingLevel
+}
+
+func initNestingLevel(parentFullKey string) int {
+	if len(parentFullKey) == 0 {
+		return 1
+	}
+
+	return strings.Count(parentFullKey, sep) + 2
 }
 
 func (mt *Tree) clearValues() {
