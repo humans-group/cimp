@@ -19,6 +19,7 @@ type Marshalable interface {
 	GetName() string
 	GetNestingLevel() int
 	Delete(string) error
+	IsEmpty() bool
 }
 
 type Tree struct {
@@ -227,7 +228,12 @@ func (mt *Tree) Delete(fullKey string) error {
 			continue
 		}
 		if !isFinal {
-			return v.Delete(fullKey)
+			if err := v.Delete(fullKey); err != nil {
+				return err
+			}
+			if !v.IsEmpty() {
+				return nil
+			}
 		}
 		deletedName = v.GetName()
 		delete(mt.Content, deletedName)
@@ -273,7 +279,12 @@ func (mb *Branch) Delete(fullKey string) error {
 	}
 
 	if !isFinal {
-		return mb.Content[searchIdx].Delete(fullKey)
+		if err := mb.Content[searchIdx].Delete(fullKey); err != nil {
+			return err
+		}
+		if !mb.Content[searchIdx].IsEmpty() {
+			return nil
+		}
 	}
 
 	copy(mb.Content[searchIdx:], mb.Content[searchIdx+1:]) // Shift a[i+1:] left one index
@@ -283,8 +294,13 @@ func (mb *Branch) Delete(fullKey string) error {
 	return nil
 }
 
-func (ml *Leaf) Delete(_ string) error {
-	return ErrorUnsupported
+func (ml *Leaf) Delete(fullKey string) error {
+	if ml.FullKey != fullKey {
+		return fmt.Errorf("incorrect key for leaf deletion: %q", fullKey)
+	}
+	ml.Value = nil
+
+	return nil
 }
 
 func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
@@ -405,10 +421,6 @@ func (ml *Leaf) DeepClone() *Leaf {
 	}
 }
 
-func (mt *Tree) IsEmpty() bool {
-	return len(mt.Order) == 0
-}
-
 func (ml *Leaf) SetYamlMarshalStyle(s yaml.Style) {
 	ml.yamlMarshalStyle = s
 }
@@ -453,6 +465,10 @@ func (mb *Branch) GetNestingLevel() int {
 	return mb.nestingLevel
 }
 
+func (mb *Branch) IsEmpty() bool {
+	return len(mb.Content) == 0
+}
+
 func (mt *Tree) GetName() string {
 	return mt.Name
 }
@@ -465,6 +481,10 @@ func (mt *Tree) GetNestingLevel() int {
 	return mt.nestingLevel
 }
 
+func (mt *Tree) IsEmpty() bool {
+	return len(mt.Content) == 0
+}
+
 func (ml *Leaf) GetName() string {
 	return ml.Name
 }
@@ -475,6 +495,10 @@ func (ml *Leaf) GetFullKey() string {
 
 func (ml *Leaf) GetNestingLevel() int {
 	return ml.nestingLevel
+}
+
+func (ml *Leaf) IsEmpty() bool {
+	return ml.Value == nil
 }
 
 func initNestingLevel(parentFullKey string) int {
