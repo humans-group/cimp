@@ -7,13 +7,7 @@
 - true
 - 16.466
 - Level1: First
-  Level2:
-    - Two
-    - 2
+  Level2: [Two, 2]
   "false":
     "3": 18.7
-  "":
-    - Some
-    - other
-    - false
-    - things
+  "": [Some, other, false, things]
