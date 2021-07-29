@@ -20,6 +20,10 @@ type Marshalable interface {
 	GetNestingLevel() int
 	Delete(string) error
 	IsEmpty() bool
+	ChangeName(name, parentFullKey string)
+	// changeFullKey will change the key recursively, but after that many things can be crashed.
+	// Don't use if you want to continue to work with tree.
+	changeFullKey(string)
 }
 
 type Tree struct {
@@ -307,13 +311,26 @@ func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
 	if _, ok := mt.Content[name]; !ok {
 		mt.Order = append(mt.Order, name)
 	}
+
 	switch item := value.(type) {
 	case *Tree:
 		item.nestingLevel = mt.nestingLevel + 1
+		item.FullKey = MakeFullKey(mt.FullKey, name)
+		item.Name = name
+		for _, element := range item.Content {
+			item.AddOrReplaceDirectly(element.GetName(), element)
+		}
 	case *Branch:
 		item.nestingLevel = mt.nestingLevel + 1
+		item.FullKey = MakeFullKey(mt.FullKey, name)
+		item.Name = name
+		for idx, element := range item.Content {
+			item.AddOrReplaceDirectly(idx, element)
+		}
 	case *Leaf:
 		item.nestingLevel = mt.nestingLevel + 1
+		item.FullKey = MakeFullKey(mt.FullKey, name)
+		item.Name = name
 	}
 
 	mt.Content[name] = value
@@ -321,6 +338,46 @@ func (mt *Tree) AddOrReplaceDirectly(name string, value Marshalable) {
 
 func (mb *Branch) Add(value Marshalable) {
 	mb.Content = append(mb.Content, value)
+}
+
+func (mb *Branch) AddOrReplaceDirectly(idx int, value Marshalable) {
+	if idx > len(mb.Content) {
+		idx = len(mb.Content)
+	}
+
+	newName := value.GetName()
+	// if current name is a number
+	if _, err := strconv.Atoi(newName); err == nil {
+		newName = strconv.Itoa(idx)
+	}
+
+	itemNewFullKey := MakeFullKey(mb.FullKey, newName)
+	switch item := value.(type) {
+	case *Tree:
+		item.nestingLevel = mb.nestingLevel + 1
+		item.FullKey = itemNewFullKey
+		item.Name = newName
+		for _, element := range item.Content {
+			item.AddOrReplaceDirectly(element.GetName(), element)
+		}
+	case *Branch:
+		item.nestingLevel = mb.nestingLevel + 1
+		item.FullKey = itemNewFullKey
+		item.Name = newName
+		for subIdx, element := range item.Content {
+			item.AddOrReplaceDirectly(subIdx, element)
+		}
+	case *Leaf:
+		item.nestingLevel = mb.nestingLevel + 1
+		item.FullKey = itemNewFullKey
+		item.Name = newName
+	}
+
+	if idx < len(mb.Content) {
+		mb.Content[idx] = value
+	} else {
+		mb.Content = append(mb.Content, value)
+	}
 }
 
 func (mt *Tree) ShallowClone() *Tree {
@@ -501,6 +558,21 @@ func (ml *Leaf) IsEmpty() bool {
 	return ml.Value == nil
 }
 
+func (mt *Tree) ChangeName(name string, parentFullKey string) {
+	mt.Name = name
+	mt.changeFullKey(MakeFullKey(parentFullKey, name))
+}
+
+func (mb *Branch) ChangeName(name string, parentFullKey string) {
+	mb.Name = name
+	mb.changeFullKey(MakeFullKey(parentFullKey, name))
+}
+
+func (ml *Leaf) ChangeName(name string, parentFullKey string) {
+	ml.Name = name
+	ml.changeFullKey(MakeFullKey(parentFullKey, name))
+}
+
 func initNestingLevel(parentFullKey string) int {
 	if len(parentFullKey) == 0 {
 		return 1
@@ -528,4 +600,22 @@ func (ml *Leaf) clearValues() {
 	if ml.Value != nil {
 		ml.Value = nil
 	}
+}
+
+func (mt *Tree) changeFullKey(fullKey string) {
+	mt.FullKey = fullKey
+	for _, v := range mt.Content {
+		v.changeFullKey(MakeFullKey(fullKey, v.GetName()))
+	}
+}
+
+func (mb *Branch) changeFullKey(fullKey string) {
+	mb.FullKey = fullKey
+	for _, v := range mb.Content {
+		v.changeFullKey(MakeFullKey(fullKey, v.GetName()))
+	}
+}
+
+func (ml *Leaf) changeFullKey(fullKey string) {
+	ml.FullKey = fullKey
 }
