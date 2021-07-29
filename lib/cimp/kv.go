@@ -26,8 +26,9 @@ type TreeConverter interface {
 }
 
 type branchesToStringConverter struct {
-	Format FileFormat
-	Indent int
+	Format     FileFormat
+	Indent     int
+	Exceptions map[string]string
 }
 
 type branchesToTreeConverter struct {
@@ -168,10 +169,11 @@ func (kv *KV) DeepClone() *KV {
 	return newKV
 }
 
-func (kv *KV) ConvertBranchesToString(format FileFormat, indent int) error {
+func (kv *KV) ConvertBranchesToString(format FileFormat, indent int, exceptions map[string]string) error {
 	tc := branchesToStringConverter{
-		Format: format,
-		Indent: indent,
+		Format:     format,
+		Indent:     indent,
+		Exceptions: exceptions,
 	}
 
 	convertedTree, err := tc.Convert(kv.tree)
@@ -253,6 +255,9 @@ func (c branchesToStringConverter) Convert(mt *tree.Tree) (*tree.Tree, error) {
 		case *tree.Leaf:
 			continue // already added by ShallowClone
 		case *tree.Branch:
+			if _, ok := c.Exceptions[v.GetFullKey()]; ok {
+				continue
+			}
 			buf := bytes.Buffer{}
 			switch c.Format {
 			case JSONFormat:
@@ -270,16 +275,20 @@ func (c branchesToStringConverter) Convert(mt *tree.Tree) (*tree.Tree, error) {
 			}
 
 			leaf := tree.NewLeaf(k, mt.FullKey)
-			leafValueBuf := bytes.NewBufferString("\n")
-			leafValueBuf.Write(buf.Bytes())
-			endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.GetNestingLevel())*c.Indent))
-			leafValue := bytes.ReplaceAll(
-				leafValueBuf.Bytes(),
-				[]byte("\n"),
-				endLineAndIndent,
-			)
-			leafValue = bytes.TrimSuffix(leafValue, endLineAndIndent)
-			leaf.Value = string(leafValue)
+			if len(buf.Bytes()) > 0 && buf.Bytes()[0] == byte('[') {
+				leaf.Value = string(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+			} else {
+				leafValueBuf := bytes.NewBufferString("\n")
+				leafValueBuf.Write(buf.Bytes())
+				endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.GetNestingLevel())*c.Indent))
+				leafValue := bytes.ReplaceAll(
+					leafValueBuf.Bytes(),
+					[]byte("\n"),
+					endLineAndIndent,
+				)
+				leafValue = bytes.TrimSuffix(leafValue, endLineAndIndent)
+				leaf.Value = string(leafValue)
+			}
 
 			newTree.AddOrReplaceDirectly(k, leaf)
 		case *tree.Tree:
