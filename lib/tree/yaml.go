@@ -135,6 +135,7 @@ func (mb *Branch) MarshalYAML() (interface{}, error) {
 		nodeContent = append(nodeContent, childNode)
 	}
 
+	// It's needed for marshaling slices of scalars in one string
 	style := yaml.LiteralStyle
 	if isAllLeafs {
 		style = yaml.FlowStyle
