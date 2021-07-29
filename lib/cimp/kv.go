@@ -198,6 +198,8 @@ func (kv *KV) ConvertBranchesToTree(branchPathToBranchElementFieldName map[strin
 	return nil
 }
 
+// ConvertBranchesKeysAsForTree converts only keys.
+// It can be useful before marshaling, but if you want to change values or something after that - keys may to be returned to default values.
 func (kv *KV) ConvertBranchesKeysAsForTree(branchPathToBranchElementFieldName map[string]string) error {
 	tc := branchesToTreeConverter{
 		branchPathToBranchElementFieldName: branchPathToBranchElementFieldName,
