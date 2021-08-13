@@ -119,7 +119,11 @@ func (ml *Leaf) UnmarshalYAML(node *yaml.Node) error {
 
 func (mb *Branch) MarshalYAML() (interface{}, error) {
 	var nodeContent []*yaml.Node
+	isAllLeafs := true
 	for i, item := range mb.Content {
+		if _, ok := item.(*Leaf); isAllLeafs && !ok {
+			isAllLeafs = false
+		}
 		marshaled, err := item.MarshalYAML()
 		if err != nil {
 			return nil, fmt.Errorf("convert #%d item to YAML-node: %w", i, err)
@@ -131,9 +135,16 @@ func (mb *Branch) MarshalYAML() (interface{}, error) {
 		nodeContent = append(nodeContent, childNode)
 	}
 
+	// It's needed for marshaling slices of scalars in one string
+	style := yaml.LiteralStyle
+	if isAllLeafs {
+		style = yaml.FlowStyle
+	}
+
 	return &yaml.Node{
 		Kind:    yaml.SequenceNode,
 		Content: nodeContent,
+		Style:   style,
 	}, nil
 }
 

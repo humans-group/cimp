@@ -21,9 +21,19 @@ type KV struct {
 
 type index map[string]tree.Path
 
-type treeConverter struct {
-	Format FileFormat
-	Indent int
+type TreeConverter interface {
+	Convert(tree.Tree) (*tree.Tree, error)
+}
+
+type branchesToStringConverter struct {
+	Format     FileFormat
+	Indent     int
+	Exceptions map[string]string
+}
+
+type branchesToTreeConverter struct {
+	branchPathToBranchElementFieldName map[string]string
+	onlyKeys                           bool // it'll convert only keys as for tree. Don't use converted tree after that!!! It'll be broken and can be only marshalled.
 }
 
 const consulSep = "/"
@@ -159,15 +169,48 @@ func (kv *KV) DeepClone() *KV {
 	return newKV
 }
 
-func (kv *KV) ConvertBranchesToString(format FileFormat, indent int) error {
-	tc := treeConverter{
-		Format: format,
-		Indent: indent,
+func (kv *KV) ConvertBranchesToString(format FileFormat, indent int, exceptions map[string]string) error {
+	tc := branchesToStringConverter{
+		Format:     format,
+		Indent:     indent,
+		Exceptions: exceptions,
 	}
 
-	convertedTree, err := tc.convertBranchesToString(kv.tree)
+	convertedTree, err := tc.Convert(kv.tree)
 	if err != nil {
 		return fmt.Errorf("convert branches to string: %w", err)
+	}
+	kv.SetTree(convertedTree)
+
+	return nil
+}
+
+func (kv *KV) ConvertBranchesToTree(branchPathToBranchElementFieldName map[string]string) error {
+	tc := branchesToTreeConverter{
+		branchPathToBranchElementFieldName: branchPathToBranchElementFieldName,
+		onlyKeys:                           false,
+	}
+
+	convertedTree, err := tc.Convert(kv.tree)
+	if err != nil {
+		return fmt.Errorf("convert branches to trees: %w", err)
+	}
+	kv.SetTree(convertedTree)
+
+	return nil
+}
+
+// ConvertBranchesKeysAsForTree converts only keys.
+// It can be useful before marshaling, but if you want to change values or something after that - keys may to be returned to default values.
+func (kv *KV) ConvertBranchesKeysAsForTree(branchPathToBranchElementFieldName map[string]string) error {
+	tc := branchesToTreeConverter{
+		branchPathToBranchElementFieldName: branchPathToBranchElementFieldName,
+		onlyKeys:                           true,
+	}
+
+	convertedTree, err := tc.Convert(kv.tree)
+	if err != nil {
+		return fmt.Errorf("convert branches' keys as for tree: %w", err)
 	}
 	kv.SetTree(convertedTree)
 
@@ -203,15 +246,18 @@ func (kv *KV) setNamesToSnakeCase(m tree.Marshalable) {
 	}
 }
 
-// ConvertBranchesToString walks recursively through the map and marshals all slices to strings
-func (c treeConverter) convertBranchesToString(mt *tree.Tree) (*tree.Tree, error) {
+// Convert walks recursively through the map and marshals all slices to strings
+func (c branchesToStringConverter) Convert(mt *tree.Tree) (*tree.Tree, error) {
 	newTree := mt.ShallowClone()
 
 	for k, v := range mt.Content {
 		switch item := v.(type) {
 		case *tree.Leaf:
-			continue
+			continue // already added by ShallowClone
 		case *tree.Branch:
+			if _, ok := c.Exceptions[v.GetFullKey()]; ok {
+				continue
+			}
 			buf := bytes.Buffer{}
 			switch c.Format {
 			case JSONFormat:
@@ -229,20 +275,91 @@ func (c treeConverter) convertBranchesToString(mt *tree.Tree) (*tree.Tree, error
 			}
 
 			leaf := tree.NewLeaf(k, mt.FullKey)
-			leafValueBuf := bytes.NewBufferString("\n")
-			leafValueBuf.Write(buf.Bytes())
-			endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.GetNestingLevel())*c.Indent))
-			leafValue := bytes.ReplaceAll(
-				leafValueBuf.Bytes(),
-				[]byte("\n"),
-				endLineAndIndent,
-			)
-			leafValue = bytes.TrimSuffix(leafValue, endLineAndIndent)
-			leaf.Value = string(leafValue)
+			if len(buf.Bytes()) > 0 && buf.Bytes()[0] == byte('[') {
+				leaf.Value = string(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+			} else {
+				leafValueBuf := bytes.NewBufferString("\n")
+				leafValueBuf.Write(buf.Bytes())
+				endLineAndIndent := []byte("\n" + strings.Repeat(" ", int(leaf.GetNestingLevel())*c.Indent))
+				leafValue := bytes.ReplaceAll(
+					leafValueBuf.Bytes(),
+					[]byte("\n"),
+					endLineAndIndent,
+				)
+				leafValue = bytes.TrimSuffix(leafValue, endLineAndIndent)
+				leaf.Value = string(leafValue)
+			}
 
 			newTree.AddOrReplaceDirectly(k, leaf)
 		case *tree.Tree:
-			newItem, err := c.convertBranchesToString(item)
+			newItem, err := c.Convert(item)
+			if err != nil {
+				return nil, fmt.Errorf("convert branches of tree %q: %w", k, err)
+			}
+			newTree.AddOrReplaceDirectly(k, newItem)
+		}
+	}
+
+	return newTree, nil
+}
+
+// Convert walks recursively through the map and marshals needed slices to trees
+func (c branchesToTreeConverter) Convert(mt *tree.Tree) (*tree.Tree, error) {
+	newTree := mt.ShallowClone()
+
+	for k, v := range mt.Content {
+		switch item := v.(type) {
+		case *tree.Leaf:
+			continue // already added by ShallowClone
+		case *tree.Branch:
+			fieldName, isBranchShouldBeConverted := c.branchPathToBranchElementFieldName[v.GetFullKey()]
+			if !isBranchShouldBeConverted {
+				continue
+			}
+
+			convertedTree := tree.NewSubTree(v.GetName(), mt.GetFullKey())
+			branchWithConvertedKeys := v.(*tree.Branch).DeepClone()
+			for elementIdx, branchElement := range v.(*tree.Branch).Content {
+				branchElementAsTree, isTree := branchElement.(*tree.Tree)
+				branchElementName := ""
+				if !isTree {
+					return nil, fmt.Errorf("branch %q should be converted to tree, but it's not branch of trees", v.GetFullKey())
+				}
+
+				isBranchElementHaveField := false
+				for _, treeElement := range branchElementAsTree.Content {
+					if treeElement.GetName() != fieldName {
+						continue
+					}
+					isBranchElementHaveField = true
+					treeElementAsLeaf, isTreeElementLeaf := treeElement.(*tree.Leaf)
+					if !isTreeElementLeaf {
+						return nil, fmt.Errorf("field %q of element #%d of branch %q is not a leaf", fieldName, elementIdx+1, v.GetFullKey())
+					}
+					treeElementValueAsString, isTreeElementValueString := treeElementAsLeaf.Value.(string)
+					if !isTreeElementValueString {
+						return nil, fmt.Errorf("field %q of element #%d of branch %q is not a string", fieldName, elementIdx+1, v.GetFullKey())
+					}
+					branchElementName = treeElementValueAsString
+					break
+				}
+				if !isBranchElementHaveField {
+					return nil, fmt.Errorf("branch element #%d of branch %q doesn't have field %q", elementIdx+1, v.GetFullKey(), fieldName)
+				}
+
+				if !c.onlyKeys {
+					convertedTree.AddOrReplaceDirectly(branchElementName, branchElementAsTree)
+				} else {
+					branchWithConvertedKeys.Content[elementIdx].ChangeName(branchElementName, v.GetFullKey())
+				}
+			}
+			if !c.onlyKeys {
+				newTree.AddOrReplaceDirectly(k, convertedTree)
+			} else {
+				newTree.AddOrReplaceDirectly(k, branchWithConvertedKeys)
+			}
+		case *tree.Tree:
+			newItem, err := c.Convert(item)
 			if err != nil {
 				return nil, fmt.Errorf("convert branches of tree %q: %w", k, err)
 			}
